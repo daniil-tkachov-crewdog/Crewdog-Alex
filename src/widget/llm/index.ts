@@ -11,4 +11,10 @@ export function getLLM(): LLMProvider {
   return new OpenAIProvider();
 }
 
-export type { ChatMessage, LLMProvider } from "./types";
+export type {
+  ChatMessage,
+  LLMProvider,
+  ToolSpec,
+  ToolHandler,
+  CompleteOptions,
+} from "./types";

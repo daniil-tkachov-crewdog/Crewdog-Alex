@@ -1,16 +1,20 @@
 import type { NextRequest } from "next/server";
 import { getLLM, type ChatMessage } from "@/widget/llm";
-import { buildSystemPrompt, PLACEHOLDER_BRAND } from "@/widget/system-prompt";
+import { buildSystemPrompt } from "@/widget/system-prompt";
+import { getClientConfigById } from "@/widget/data/client-config";
+import { SEARCH_JOBS_TOOL, makeSearchJobsHandler } from "@/widget/search-tool";
 
 /**
  * POST /api/chat — the widget orchestrator.
  *
- * Public endpoint (job hunters never log in). Takes the conversation so far,
- * prepends Alex's system prompt, calls the LLM behind the swappable interface,
- * and returns the reply for the widget to render.
+ * Public endpoint (job hunters never log in). Flow:
+ *   1. Resolve the tenant from client_id (branding + subscription gate).
+ *   2. Refuse to serve inactive/unknown tenants.
+ *   3. Prepend the branded system prompt, expose the search_jobs tool, and
+ *      let the LLM (behind the swappable interface) run the conversation.
  *
- * Slice 1: chat only. `client_id` is accepted but not yet used to resolve
- * branding, subscription gating, or job search — those land in later slices.
+ * The LLM never touches the DB — search_jobs' handler does, always scoped to
+ * this tenant's client_id.
  */
 
 interface ChatRequestBody {
@@ -28,6 +32,11 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
+  const clientId = typeof body.client_id === "string" ? body.client_id.trim() : "";
+  if (!clientId) {
+    return Response.json({ error: "Missing client_id." }, { status: 400 });
+  }
+
   const incoming = Array.isArray(body.messages) ? body.messages : [];
   // Only trust user/assistant turns from the client; the system prompt is ours.
   const history = incoming.filter(
@@ -39,20 +48,38 @@ export async function POST(request: NextRequest) {
   );
 
   if (history.length === 0) {
+    return Response.json({ error: "No message to respond to." }, { status: 400 });
+  }
+
+  // Resolve tenant + gate. Unknown or unpaid clients are not served.
+  const client = await getClientConfigById(clientId);
+  if (!client) {
+    return Response.json({ error: "Unknown assistant." }, { status: 404 });
+  }
+  if (!client.active) {
     return Response.json(
-      { error: "No message to respond to." },
-      { status: 400 }
+      { error: "This assistant isn't active right now." },
+      { status: 403 }
     );
   }
 
   const messages: ChatMessage[] = [
-    { role: "system", content: buildSystemPrompt(PLACEHOLDER_BRAND) },
+    {
+      role: "system",
+      content: buildSystemPrompt({
+        assistantName: client.assistantName,
+        boardName: client.boardName,
+      }),
+    },
     ...history,
   ];
 
   try {
     const llm = getLLM();
-    const reply = await llm.complete(messages);
+    const reply = await llm.complete(messages, {
+      tools: [SEARCH_JOBS_TOOL],
+      handlers: { search_jobs: makeSearchJobsHandler(client.clientId) },
+    });
     return Response.json({ reply });
   } catch (err) {
     // Keep the real reason server-side; the client gets a safe message.

@@ -9,13 +9,20 @@ folder. Everything keys off `client_id`.
 ```
 src/widget/
   llm/
-    types.ts            LLMProvider interface + ChatMessage (the swappable seam)
-    openai-provider.ts  OpenAI implementation (server-side key only)
+    types.ts            LLMProvider interface, ChatMessage, ToolSpec/ToolHandler
+    openai-provider.ts  OpenAI implementation + tool loop (server-side key only)
     index.ts            getLLM() factory — callers never name a vendor
-  system-prompt.ts      Alex persona + clarifying-questions rule (placeholder brand)
+  data/
+    client-config.ts    getClientConfigById() — resolve tenant + gate from client_id
+    search-jobs.ts       plain filtered query over the jobs table (tenant-scoped)
+  search-tool.ts        the search_jobs tool spec (required params) + handler
+  system-prompt.ts      Alex persona + clarifying-questions rule (branded)
+
+src/lib/supabase/
+  service.ts            server-only service-role client (bypasses RLS)
 
 src/app/
-  api/chat/route.ts     POST /api/chat — public orchestrator (system prompt → LLM)
+  api/chat/route.ts     POST /api/chat — resolve → gate → LLM + search tool
   (widget)/embed/       The chat window UI served inside the iframe
 
 public/
@@ -27,45 +34,37 @@ single source of truth both tracks meet on.
 
 ## Status
 
-**Slice 1 (done):** chat only — real GPT replies, placeholder branding.
-No job search, no DB reads, no `client_id` resolution yet.
+**Slice 1 (done):** chat only — real GPT replies.
 
-**Next:** `search_jobs` tool-calling (hard enforcement of clarifying questions),
-per-tenant branding + subscription gating from `client_id`. The `jobs` table
-now exists — see the two open items below before wiring search.
+**Slice 2 (done):** `search_jobs` tool-calling (required `title`/`location` =
+hard enforcement of clarifying questions), plain tenant-scoped job search over
+the real `jobs` table (surfaces `job_link`, excludes `disabled` rows), branding
++ subscription gating resolved from `client_id`. Read path: **server-side
+service-role** key in `/api/chat` (bypasses RLS; key stays server-only).
 
-## ⚠️ Open items for the widget (do these before `search_jobs`)
+**Next:** per-tenant logo/colour branding (needs portal-stored branding
+columns), account-level `is_live` gating, usage/token metering.
 
-The portal (Track B) landed the job database: the `public.jobs` table is live
-in Supabase, and the dashboard writes/edits/deletes rows scoped by `client_id`.
-Two things the widget side still needs:
+## Gating (v1)
 
-1. **Mirror the contract change.** `src/shared/job-schema.ts` now has a
-   `job_link` field (link to the original posting) and the dashboard adds a
-   `disabled` flag on rows. When `search_jobs` runs:
-   - **surface `job_link`** for every matching job in Alex's reply, and
-   - **exclude `disabled = true` rows** — disabled jobs must never appear in
-     search results.
-2. **Decide the widget's Supabase read path.** Current RLS on `public.jobs`
-   only grants access to the logged-in *owner* (`client_id = the user's
-   profile`). Job hunters never log in, so the widget can't read jobs under
-   those policies as-is. Pick one before search works:
-   - a public `SELECT` RLS policy filtered to `disabled = false` (widget reads
-     with the anon key by `client_id`), **or**
-   - a server-side read using the service-role key in `/api/chat` (bypasses
-     RLS; keep the key server-only).
+A widget serves only when the account's subscription tier is paid (not
+`free`). The live DB has no account-level `is_live` column yet, so that half
+of the contract's `isWidgetActive` is deferred. **Comped/admin accounts are
+comped by setting a paid tier** on their `profiles` row.
 
 ## Known caveats
 
 - **`proxy.ts` runs `supabase.auth.getUser()` on `/embed` and `/api/chat`.**
-  These are public routes (job hunters never log in), so that auth call is
-  wasted work — harmless, but not needed. Left untouched to keep the widget
-  diff off portal code. When touching `proxy.ts` next, exclude the widget
-  paths from its matcher.
-- **`Job.salary` is free text** (e.g. `"£45k–£55k"`), not numeric. A future
-  `search_jobs(salary_min)` filter will need fuzzy parsing, not a `>=` compare.
+  These are public routes, so that auth call is wasted work — harmless, but
+  not needed. Left untouched to keep the widget diff off portal code. When
+  touching `proxy.ts` next, exclude the widget paths from its matcher.
+- **`salary` is free text** (e.g. `"£45k–£55k"`), not numeric, so search does
+  not filter on it in v1 — a future `salary_min` filter needs fuzzy parsing.
+- **Tenant isolation is enforced in code, not RLS**: the widget reads with the
+  service-role key (bypasses RLS), so every query MUST filter by `client_id`.
 
 ## Config (Render env vars — server-side only)
 
 - `OPENAI_API_KEY` — required. Never exposed to the browser.
 - `OPENAI_MODEL` — optional, defaults to `gpt-4o-mini`.
+- `SUPABASE_SERVICE_ROLE_KEY` — required. Server-only; bypasses RLS.
