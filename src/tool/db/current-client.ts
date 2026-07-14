@@ -1,5 +1,5 @@
 import type { ClientConfig, SubscriptionStatus } from "@/shared/client-id";
-import type { Job } from "@/shared/job-schema";
+import type { JobRow } from "@/shared/job-schema";
 import { createClient } from "@/lib/supabase/server";
 import { seedClientConfig, seedJobs, seedUsage } from "./seed";
 
@@ -57,8 +57,70 @@ export async function getCurrentClientConfig(): Promise<ClientConfig> {
   };
 }
 
-export async function getCurrentClientJobs(): Promise<Job[]> {
-  return seedJobs;
+/**
+ * Resolve the client_id for the logged-in user, or null if there's no session
+ * (e.g. localhost without login). Server actions use this to stamp/scope every
+ * write; RLS enforces the same rule as defence-in-depth.
+ */
+export async function getSessionClientId(): Promise<string | null> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("client_id")
+    .eq("id", user.id)
+    .single();
+
+  return profile?.client_id ?? null;
+}
+
+export async function getCurrentClientJobs(): Promise<JobRow[]> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  // No session → dev/preview fallback so the table still renders locally.
+  if (!user) {
+    return seedJobs;
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("client_id")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile) {
+    return seedJobs;
+  }
+
+  const { data, error } = await supabase
+    .from("jobs")
+    .select("row_id, source_id, title, description, location, salary, job_link, disabled")
+    .eq("client_id", profile.client_id)
+    .order("created_at", { ascending: true });
+
+  // Logged in but no jobs yet (or a read error) → empty table, not the seed.
+  if (error || !data) {
+    return [];
+  }
+
+  return data.map((r) => ({
+    row_id: r.row_id as string,
+    id: r.source_id as string,
+    client_id: profile.client_id as string,
+    title: r.title as string,
+    description: r.description as string,
+    location: r.location as string,
+    salary: r.salary as string,
+    job_link: r.job_link as string,
+    disabled: r.disabled as boolean,
+  }));
 }
 
 export async function getCurrentClientUsage(): Promise<{

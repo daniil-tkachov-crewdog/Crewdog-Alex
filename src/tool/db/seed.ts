@@ -1,5 +1,5 @@
 import type { ClientConfig } from "@/shared/client-id";
-import type { Job } from "@/shared/job-schema";
+import type { JobRow } from "@/shared/job-schema";
 
 /**
  * Seeded dev tenant. With auth deferred there is no logged-in account to
@@ -23,30 +23,39 @@ export const seedClientConfig: ClientConfig = {
 };
 
 /** A few sample rows so the Import table isn't empty in dev. */
-export const seedJobs: Job[] = [
+export const seedJobs: JobRow[] = [
   {
+    row_id: "seed-1024",
     id: "1024",
     client_id: DEV_CLIENT_ID,
     title: "Senior Frontend Engineer",
     description: "Own the design system and ship the marketing site.",
     location: "London (Hybrid)",
     salary: "£70k–£85k",
+    job_link: "https://acme.example/jobs/1024",
+    disabled: false,
   },
   {
+    row_id: "seed-1025",
     id: "1025",
     client_id: DEV_CLIENT_ID,
     title: "Product Designer",
     description: "End-to-end product design across web and mobile.",
     location: "Remote (UK)",
     salary: "£55k–£65k",
+    job_link: "https://acme.example/jobs/1025",
+    disabled: false,
   },
   {
+    row_id: "seed-1026",
     id: "1026",
     client_id: DEV_CLIENT_ID,
     title: "Data Analyst",
     description: "Turn product data into decisions the team can act on.",
     location: "Manchester",
     salary: "£45k–£52k",
+    job_link: "https://acme.example/jobs/1026",
+    disabled: false,
   },
 ];
 
