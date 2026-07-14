@@ -31,7 +31,29 @@ single source of truth both tracks meet on.
 No job search, no DB reads, no `client_id` resolution yet.
 
 **Next:** `search_jobs` tool-calling (hard enforcement of clarifying questions),
-the `jobs` table, per-tenant branding + subscription gating from `client_id`.
+per-tenant branding + subscription gating from `client_id`. The `jobs` table
+now exists — see the two open items below before wiring search.
+
+## ⚠️ Open items for the widget (do these before `search_jobs`)
+
+The portal (Track B) landed the job database: the `public.jobs` table is live
+in Supabase, and the dashboard writes/edits/deletes rows scoped by `client_id`.
+Two things the widget side still needs:
+
+1. **Mirror the contract change.** `src/shared/job-schema.ts` now has a
+   `job_link` field (link to the original posting) and the dashboard adds a
+   `disabled` flag on rows. When `search_jobs` runs:
+   - **surface `job_link`** for every matching job in Alex's reply, and
+   - **exclude `disabled = true` rows** — disabled jobs must never appear in
+     search results.
+2. **Decide the widget's Supabase read path.** Current RLS on `public.jobs`
+   only grants access to the logged-in *owner* (`client_id = the user's
+   profile`). Job hunters never log in, so the widget can't read jobs under
+   those policies as-is. Pick one before search works:
+   - a public `SELECT` RLS policy filtered to `disabled = false` (widget reads
+     with the anon key by `client_id`), **or**
+   - a server-side read using the service-role key in `/api/chat` (bypasses
+     RLS; keep the key server-only).
 
 ## Known caveats
 
