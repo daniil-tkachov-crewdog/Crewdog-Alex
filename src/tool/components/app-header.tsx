@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { LogOut } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { logout } from "@/app/login/actions";
 
 const nav = [
   { href: "/dashboard", label: "Dashboard" },
@@ -15,7 +16,6 @@ const nav = [
 /** Signed-in app header: logo left, section nav, red Log out right. */
 export function AppHeader() {
   const pathname = usePathname();
-  const router = useRouter();
 
   return (
     <header className="sticky top-0 z-40 w-full border-b bg-background">
@@ -42,15 +42,17 @@ export function AppHeader() {
             })}
           </nav>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => router.push("/")}
-          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-        >
-          <LogOut className="size-4" />
-          Log out
-        </Button>
+        <form action={logout}>
+          <Button
+            type="submit"
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+          >
+            <LogOut className="size-4" />
+            Log out
+          </Button>
+        </form>
       </div>
     </header>
   );

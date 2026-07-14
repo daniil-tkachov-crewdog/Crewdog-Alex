@@ -5,7 +5,7 @@
  */
 
 export interface Plan {
-  id: "starter" | "growth" | "scale";
+  id: "starter" | "pro" | "scale";
   name: string;
   /** Monthly price in whole currency units (placeholder). */
   price: number;
@@ -33,8 +33,8 @@ export const PLANS: Plan[] = [
     ],
   },
   {
-    id: "growth",
-    name: "Growth",
+    id: "pro",
+    name: "Pro",
     price: 149,
     currency: "£",
     tagline: "For growing boards with steady candidate traffic.",
@@ -55,7 +55,7 @@ export const PLANS: Plan[] = [
     tagline: "For high-volume boards that need headroom.",
     tokenLimit: 5_000_000,
     features: [
-      "Everything in Growth",
+      "Everything in Pro",
       "Multiple boards",
       "Dedicated onboarding",
       "Up to 5M tokens / mo",
