@@ -1,5 +1,5 @@
 import type { ClientConfig } from "@/shared/client-id";
-import type { StatusTone } from "@/components/app/status-light";
+import type { StatusTone } from "@/tool/components/status-light";
 
 /**
  * Derives the chatbot health light from tenant state.

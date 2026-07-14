@@ -1,5 +1,5 @@
-import { getCurrentClientConfig } from "@/db/current-client";
-import { SettingsView } from "@/features/settings/settings-view";
+import { getCurrentClientConfig } from "@/tool/db/current-client";
+import { SettingsView } from "@/tool/features/settings/settings-view";
 
 export const metadata = { title: "Settings — Crewdog Alex" };
 

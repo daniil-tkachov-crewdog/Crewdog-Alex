@@ -1,4 +1,4 @@
-import { LegalPage } from "@/components/marketing/legal-page";
+import { LegalPage } from "@/website/components/legal-page";
 
 export const metadata = { title: "Privacy Policy — Crewdog Alex" };
 

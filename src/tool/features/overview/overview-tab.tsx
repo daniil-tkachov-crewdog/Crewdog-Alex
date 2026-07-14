@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { StatusLight } from "@/components/app/status-light";
+import { StatusLight } from "@/tool/components/status-light";
 import { computeHealth } from "./health";
 
 /** Base host the embed script is served from (placeholder until the widget deploys). */

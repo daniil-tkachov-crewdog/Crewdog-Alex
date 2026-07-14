@@ -1,5 +1,5 @@
-import { SiteHeader } from "@/components/marketing/site-header";
-import { SiteFooter } from "@/components/marketing/site-footer";
+import { SiteHeader } from "@/website/components/site-header";
+import { SiteFooter } from "@/website/components/site-footer";
 
 /** Layout for all public marketing + legal pages: header + footer chrome. */
 export default function MarketingLayout({

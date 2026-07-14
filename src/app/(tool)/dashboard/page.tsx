@@ -3,10 +3,10 @@ import {
   getCurrentClientConfig,
   getCurrentClientJobs,
   getCurrentClientUsage,
-} from "@/db/current-client";
-import { BrandingTab } from "@/features/branding/branding-tab";
-import { ImportTab } from "@/features/import/import-tab";
-import { OverviewTab } from "@/features/overview/overview-tab";
+} from "@/tool/db/current-client";
+import { BrandingTab } from "@/tool/features/branding/branding-tab";
+import { ImportTab } from "@/tool/features/import/import-tab";
+import { OverviewTab } from "@/tool/features/overview/overview-tab";
 
 export const metadata = { title: "Dashboard — Crewdog Alex" };
 

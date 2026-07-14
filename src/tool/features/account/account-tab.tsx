@@ -11,8 +11,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { StatusLight } from "@/components/app/status-light";
-import { subscriptionTone, subscriptionLabel } from "@/features/billing/status";
+import { StatusLight } from "@/tool/components/status-light";
+import { subscriptionTone, subscriptionLabel } from "@/tool/features/billing/status";
 
 /**
  * Account tab. Read-mostly account details plus subscription + delete actions.

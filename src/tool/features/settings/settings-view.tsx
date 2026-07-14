@@ -4,8 +4,8 @@ import { useState } from "react";
 import type { ClientConfig } from "@/shared/client-id";
 import type { Plan } from "@/shared/plans";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AccountTab } from "@/features/account/account-tab";
-import { BillingTab } from "@/features/billing/billing-tab";
+import { AccountTab } from "@/tool/features/account/account-tab";
+import { BillingTab } from "@/tool/features/billing/billing-tab";
 
 /** Settings shell holding the Account / Billing tabs. */
 export function SettingsView({

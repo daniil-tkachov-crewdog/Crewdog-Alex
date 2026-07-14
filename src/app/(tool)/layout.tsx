@@ -1,4 +1,4 @@
-import { AppHeader } from "@/components/app/app-header";
+import { AppHeader } from "@/tool/components/app-header";
 
 /** Shell for signed-in pages (dashboard + settings). */
 export default function AppLayout({

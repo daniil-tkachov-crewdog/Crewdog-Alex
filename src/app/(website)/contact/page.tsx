@@ -1,4 +1,4 @@
-import { LegalPage } from "@/components/marketing/legal-page";
+import { LegalPage } from "@/website/components/legal-page";
 import { Button } from "@/components/ui/button";
 import { Mail } from "lucide-react";
 

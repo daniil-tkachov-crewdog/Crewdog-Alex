@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { StatusLight } from "@/components/app/status-light";
+import { StatusLight } from "@/tool/components/status-light";
 import { subscriptionTone, subscriptionLabel } from "./status";
 import { cn } from "@/lib/utils";
 

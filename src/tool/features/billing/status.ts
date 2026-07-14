@@ -1,5 +1,5 @@
 import type { SubscriptionStatus } from "@/shared/client-id";
-import type { StatusTone } from "@/components/app/status-light";
+import type { StatusTone } from "@/tool/components/status-light";
 
 export function subscriptionTone(status: SubscriptionStatus): StatusTone {
   switch (status) {
