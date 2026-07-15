@@ -17,4 +17,6 @@ export type {
   ToolSpec,
   ToolHandler,
   CompleteOptions,
+  CompleteResult,
+  UsageTotals,
 } from "./types";

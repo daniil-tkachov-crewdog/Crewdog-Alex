@@ -3,7 +3,13 @@ import type {
   ChatCompletionMessageParam,
   ChatCompletionTool,
 } from "openai/resources/chat/completions";
-import type { ChatMessage, CompleteOptions, LLMProvider } from "./types";
+import type {
+  ChatMessage,
+  CompleteOptions,
+  CompleteResult,
+  LLMProvider,
+  UsageTotals,
+} from "./types";
 
 /**
  * OpenAI implementation of the LLM interface. The API key is server-side only
@@ -31,7 +37,7 @@ export class OpenAIProvider implements LLMProvider {
   async complete(
     messages: ChatMessage[],
     options?: CompleteOptions
-  ): Promise<string> {
+  ): Promise<CompleteResult> {
     const convo: ChatCompletionMessageParam[] = messages.map((m) => ({
       role: m.role,
       content: m.content,
@@ -46,6 +52,14 @@ export class OpenAIProvider implements LLMProvider {
       },
     }));
 
+    // Accumulate token usage across every round-trip (tool loops included).
+    const usage: UsageTotals = {
+      model: this.model,
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+    };
+
     for (let round = 0; round <= OpenAIProvider.MAX_TOOL_ROUNDS; round++) {
       const completion = await this.client.chat.completions.create({
         model: this.model,
@@ -53,12 +67,16 @@ export class OpenAIProvider implements LLMProvider {
         ...(tools ? { tools, tool_choice: "auto" } : {}),
       });
 
+      usage.promptTokens += completion.usage?.prompt_tokens ?? 0;
+      usage.completionTokens += completion.usage?.completion_tokens ?? 0;
+      usage.totalTokens += completion.usage?.total_tokens ?? 0;
+
       const message = completion.choices[0]?.message;
       const toolCalls = message?.tool_calls ?? [];
 
       // No tool calls (or no handlers to run them): return the text reply.
       if (toolCalls.length === 0 || !options?.handlers) {
-        return message?.content?.trim() ?? "";
+        return { reply: message?.content?.trim() ?? "", usage };
       }
 
       // Record the assistant's tool-call turn, then answer each call.
@@ -85,6 +103,8 @@ export class OpenAIProvider implements LLMProvider {
 
     // Ran out of tool rounds — ask once more for a plain answer.
     const finalMessage = convo[convo.length - 1];
-    return typeof finalMessage?.content === "string" ? finalMessage.content : "";
+    const reply =
+      typeof finalMessage?.content === "string" ? finalMessage.content : "";
+    return { reply, usage };
   }
 }

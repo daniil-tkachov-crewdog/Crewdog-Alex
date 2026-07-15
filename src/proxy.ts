@@ -9,8 +9,10 @@ import { createServerClient } from "@supabase/ssr";
  *     (RLS + getUser in the data layer); this is just UX.
  */
 
-// Signed-in-only areas (the (tool) route group).
-const PROTECTED_PREFIXES = ["/dashboard", "/settings"];
+// Signed-in-only areas (the (tool) route group + the admin panel). The admin
+// panel additionally requires is_admin, enforced server-side in its page/
+// actions; here we only bounce signed-out users to /login.
+const PROTECTED_PREFIXES = ["/dashboard", "/settings", "/admin"];
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });

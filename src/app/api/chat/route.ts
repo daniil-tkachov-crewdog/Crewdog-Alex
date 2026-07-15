@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { getLLM, type ChatMessage } from "@/widget/llm";
-import { buildSystemPrompt } from "@/widget/system-prompt";
+import { resolveSystemPrompt } from "@/widget/data/system-prompt-config";
+import { recordUsage } from "@/widget/data/usage";
 import { getClientConfigById } from "@/widget/data/client-config";
 import { SEARCH_JOBS_TOOL, makeSearchJobsHandler } from "@/widget/search-tool";
 
@@ -66,7 +67,7 @@ export async function POST(request: NextRequest) {
   const messages: ChatMessage[] = [
     {
       role: "system",
-      content: buildSystemPrompt({
+      content: await resolveSystemPrompt({
         assistantName: client.assistantName,
         boardName: client.boardName,
       }),
@@ -76,10 +77,12 @@ export async function POST(request: NextRequest) {
 
   try {
     const llm = getLLM();
-    const reply = await llm.complete(messages, {
+    const { reply, usage } = await llm.complete(messages, {
       tools: [SEARCH_JOBS_TOOL],
       handlers: { search_jobs: makeSearchJobsHandler(client.clientId) },
     });
+    // Best-effort usage telemetry; never blocks or breaks the reply.
+    await recordUsage(client.clientId, usage);
     return Response.json({ reply });
   } catch (err) {
     // Keep the real reason server-side; the client gets a safe message.

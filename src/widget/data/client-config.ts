@@ -7,8 +7,8 @@ import { createServiceClient } from "@/lib/supabase/service";
  *
  * Gating (v1): a widget is served only when the account is in good billing
  * standing. The live DB has no account-level `is_live` column yet, so we gate
- * on subscription tier alone: any paid tier is active; "free" (or an unknown
- * client_id) is not. Comped/admin accounts are comped by setting a paid tier.
+ * on subscription tier: any paid tier is active; "free" (or an unknown
+ * client_id) is not. Premium (comped) accounts are active regardless of tier.
  */
 
 export interface ResolvedClient {
@@ -24,7 +24,7 @@ export async function getClientConfigById(
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from("profiles")
-    .select("client_id, company_name, subscription_status")
+    .select("client_id, company_name, subscription_status, is_premium")
     .eq("client_id", clientId)
     .maybeSingle();
 
@@ -33,10 +33,11 @@ export async function getClientConfigById(
   }
 
   const tier = data.subscription_status as string | null;
+  const isPremium = !!data.is_premium;
   return {
     clientId: data.client_id,
     boardName: data.company_name ?? "our job board",
     assistantName: "Alex",
-    active: !!tier && tier !== "free",
+    active: isPremium || (!!tier && tier !== "free"),
   };
 }
