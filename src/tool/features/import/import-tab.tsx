@@ -60,6 +60,7 @@ const EDIT_FIELDS: { key: keyof JobEdit; label: string }[] = [
   { key: "description", label: "Job description" },
   { key: "location", label: "Location" },
   { key: "salary", label: "Salary" },
+  { key: "category", label: "Category" },
   { key: "job_link", label: "Job link" },
 ];
 
@@ -71,6 +72,7 @@ function toEdit(job: JobRow): JobEdit {
     description: job.description,
     location: job.location,
     salary: job.salary,
+    category: job.category,
     job_link: job.job_link,
   };
 }
@@ -286,7 +288,7 @@ export function ImportTab({ jobs }: { jobs: JobRow[] }) {
                 <span className="text-muted-foreground text-sm">
                   {file
                     ? file.name
-                    : "Columns: ID, Job title, Job description, Location, Salary, Job link (optional)"}
+                    : "Columns: ID, Job title, Job description, Location, Salary, Job link + Category (optional)"}
                 </span>
               </div>
             )}
@@ -521,6 +523,13 @@ export function ImportTab({ jobs }: { jobs: JobRow[] }) {
                             </TableCell>
                             <TableCell className="align-top">
                               {job.salary}
+                            </TableCell>
+                            <TableCell className="align-top">
+                              {job.category ? (
+                                <Badge variant="secondary">{job.category}</Badge>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
                             </TableCell>
                             <TableCell className="align-top">
                               {job.job_link ? (

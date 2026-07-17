@@ -35,6 +35,9 @@ export interface JobRow extends Job {
   /** Internal surrogate primary key (jobs.row_id). Never comes from the CSV. */
   row_id: string;
   disabled: boolean;
+  /** Coarse job family, AI-derived at import and tenant-editable. Portal-only:
+   *  the widget reads it via the summary RPC, not this contract. */
+  category: string;
 }
 
 /**
@@ -47,6 +50,7 @@ export const JOB_COLUMNS = [
   { key: "description", label: "Job description" },
   { key: "location", label: "Location" },
   { key: "salary", label: "Salary" },
+  { key: "category", label: "Category" },
   { key: "job_link", label: "Job link" },
 ] as const;
 

@@ -101,7 +101,7 @@ export async function getCurrentClientJobs(): Promise<JobRow[]> {
 
   const { data, error } = await supabase
     .from("jobs")
-    .select("row_id, source_id, title, description, location, salary, job_link, disabled")
+    .select("row_id, source_id, title, description, location, salary, category, job_link, disabled")
     .eq("client_id", profile.client_id)
     .order("created_at", { ascending: true });
 
@@ -118,6 +118,7 @@ export async function getCurrentClientJobs(): Promise<JobRow[]> {
     description: r.description as string,
     location: r.location as string,
     salary: r.salary as string,
+    category: (r.category as string) ?? "",
     job_link: r.job_link as string,
     disabled: r.disabled as boolean,
   }));

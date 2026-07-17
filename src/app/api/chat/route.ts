@@ -4,6 +4,12 @@ import { resolveSystemPrompt } from "@/widget/data/system-prompt-config";
 import { recordUsage } from "@/widget/data/usage";
 import { getClientConfigById } from "@/widget/data/client-config";
 import { SEARCH_JOBS_TOOL, makeSearchJobsHandler } from "@/widget/search-tool";
+import { SUMMARIZE_JOBS_TOOL, makeSummarizeJobsHandler } from "@/widget/summary-tool";
+import {
+  resolveSearchToolConfig,
+  resolveSummaryToolConfig,
+} from "@/widget/data/tool-config";
+import type { ToolSpec, ToolHandler } from "@/widget/llm";
 
 /**
  * POST /api/chat — the widget orchestrator.
@@ -75,12 +81,25 @@ export async function POST(request: NextRequest) {
     ...history,
   ];
 
+  // Resolve admin tool config once per request; both tools share the read.
+  const [searchConfig, summaryConfig] = await Promise.all([
+    resolveSearchToolConfig(),
+    resolveSummaryToolConfig(),
+  ]);
+
+  const tools: ToolSpec[] = [SEARCH_JOBS_TOOL];
+  const handlers: Record<string, ToolHandler> = {
+    search_jobs: makeSearchJobsHandler(client.clientId, searchConfig),
+  };
+  // The summary tool is admin-toggleable; only expose it when enabled.
+  if (summaryConfig.enabled) {
+    tools.push(SUMMARIZE_JOBS_TOOL);
+    handlers.summarize_jobs = makeSummarizeJobsHandler(client.clientId, summaryConfig);
+  }
+
   try {
     const llm = getLLM();
-    const { reply, usage } = await llm.complete(messages, {
-      tools: [SEARCH_JOBS_TOOL],
-      handlers: { search_jobs: makeSearchJobsHandler(client.clientId) },
-    });
+    const { reply, usage } = await llm.complete(messages, { tools, handlers });
     // Best-effort usage telemetry; never blocks or breaks the reply.
     await recordUsage(client.clientId, usage);
     return Response.json({ reply });

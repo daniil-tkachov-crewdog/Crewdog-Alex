@@ -8,6 +8,10 @@ import {
   fetchTickets,
 } from "@/admin/data";
 import { getSystemPromptTemplate } from "@/widget/data/system-prompt-config";
+import {
+  resolveSearchToolConfig,
+  resolveSummaryToolConfig,
+} from "@/widget/data/tool-config";
 import { checkAlexHealth } from "@/admin/health";
 
 export const metadata = { title: "Admin — Crewdog Alex" };
@@ -21,13 +25,16 @@ export default async function AdminPage() {
   const admin = await getAdminIdentity();
   if (!admin) redirect("/dashboard");
 
-  const [users, usage, tickets, systemPrompt, health] = await Promise.all([
-    fetchUsers(),
-    fetchUsageSummary(30),
-    fetchTickets(),
-    getSystemPromptTemplate(),
-    checkAlexHealth(),
-  ]);
+  const [users, usage, tickets, systemPrompt, searchConfig, summaryConfig, health] =
+    await Promise.all([
+      fetchUsers(),
+      fetchUsageSummary(30),
+      fetchTickets(),
+      getSystemPromptTemplate(),
+      resolveSearchToolConfig(),
+      resolveSummaryToolConfig(),
+      checkAlexHealth(),
+    ]);
 
   return (
     <div className="flex min-h-dvh flex-col bg-muted/20">
@@ -38,6 +45,8 @@ export default async function AdminPage() {
           usage={usage}
           tickets={tickets}
           systemPrompt={systemPrompt}
+          searchConfig={searchConfig}
+          summaryConfig={summaryConfig}
           health={health}
         />
       </main>

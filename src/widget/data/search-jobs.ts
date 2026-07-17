@@ -1,17 +1,22 @@
 import { createServiceClient } from "@/lib/supabase/service";
+import {
+  resolveSearchToolConfig,
+  type SearchToolConfig,
+} from "@/widget/data/tool-config";
 
 /**
- * ── PLAIN JOB SEARCH ─────────────────────────────────────────────────
+ * ── JOB SEARCH ───────────────────────────────────────────────────────
  *
  * The LLM never touches the DB. It only decides WHEN to search and with WHAT
- * criteria (via the search_jobs tool); this runs the actual query. v1 is a
- * plain filter — no ranking, no semantic search:
+ * criteria (via the search_jobs tool); this runs the actual query through the
+ * `search_jobs_ranked` RPC, which does full-text matching (stemming, word
+ * order, stop-words) plus optional trigram typo-tolerance, ranked.
  *
- *   - always scoped to the tenant (client_id) — the isolation boundary
- *   - only live rows (disabled = false)
- *   - only rows that HAVE a link (v1 returns just links; a linkless job
- *     can't be returned as one)
- *   - title / location matched with case-insensitive ILIKE
+ * Always:
+ *   - scoped to the tenant (client_id) — the isolation boundary
+ *   - only rows that HAVE a link (v1 returns just links)
+ *   - live rows only, unless the admin config opts disabled rows in
+ * Admin config (match strategy, result count, min score) is resolved per call.
  */
 
 export interface JobSearchCriteria {
@@ -30,31 +35,33 @@ export interface JobSearchResult {
   job_link: string;
 }
 
-const MAX_RESULTS = 8;
-
 export async function searchJobs(
   clientId: string,
-  criteria: JobSearchCriteria
+  criteria: JobSearchCriteria,
+  config?: SearchToolConfig
 ): Promise<JobSearchResult[]> {
+  const cfg = config ?? (await resolveSearchToolConfig());
   const supabase = createServiceClient();
 
-  let query = supabase
-    .from("jobs")
-    .select("title, location, salary, job_link")
-    .eq("client_id", clientId)
-    .eq("disabled", false)
-    .neq("job_link", "");
+  const { data, error } = await supabase.rpc("search_jobs_ranked", {
+    p_client_id: clientId,
+    p_query: criteria.title?.trim() ?? "",
+    p_location: criteria.location?.trim() ?? "",
+    p_limit: cfg.resultsPerSearch,
+    p_min_score: cfg.minScore,
+    p_use_trgm: cfg.matchStrategy === "fuzzy",
+    p_include_disabled: cfg.includeDisabled,
+  });
 
-  if (criteria.title?.trim()) {
-    query = query.ilike("title", `%${criteria.title.trim()}%`);
-  }
-  if (criteria.location?.trim()) {
-    query = query.ilike("location", `%${criteria.location.trim()}%`);
-  }
-
-  const { data, error } = await query.limit(MAX_RESULTS);
   if (error || !data) {
+    if (error) console.error("[search-jobs] rpc error:", error.message);
     return [];
   }
-  return data as JobSearchResult[];
+
+  return (data as Array<Record<string, unknown>>).map((r) => ({
+    title: (r.title as string) ?? "",
+    location: (r.location as string) ?? "",
+    salary: (r.salary as string) ?? "",
+    job_link: (r.job_link as string) ?? "",
+  }));
 }

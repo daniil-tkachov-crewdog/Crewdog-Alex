@@ -15,6 +15,8 @@ export interface ParsedJobRow {
   location: string;
   salary: string;
   job_link: string;
+  /** Optional on import. Blank rows are AI-categorized after upload. */
+  category: string;
 }
 
 export type CsvParseResult =
@@ -33,6 +35,7 @@ const REQUIRED_HEADERS: { label: string; field: keyof ParsedJobRow }[] = [
 /** Optional headers (canonical labels) → internal field name. */
 const OPTIONAL_HEADERS: { label: string; field: keyof ParsedJobRow }[] = [
   { label: "Job link", field: "job_link" },
+  { label: "Category", field: "category" },
 ];
 
 const norm = (s: string) => s.trim().toLowerCase();
@@ -152,6 +155,7 @@ export function parseJobsCsv(csv: string): CsvParseResult {
       location: at(cells, index.location),
       salary: at(cells, index.salary),
       job_link: at(cells, index.job_link),
+      category: at(cells, index.category),
     });
   }
 

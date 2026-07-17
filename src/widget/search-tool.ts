@@ -1,5 +1,6 @@
 import type { ToolSpec, ToolHandler } from "@/widget/llm";
 import { searchJobs, type JobSearchResult } from "@/widget/data/search-jobs";
+import type { SearchToolConfig } from "@/widget/data/tool-config";
 
 /**
  * ── THE search_jobs TOOL ─────────────────────────────────────────────
@@ -57,14 +58,21 @@ function formatResults(results: JobSearchResult[]): string {
  * request context, NOT from the model — the model can never widen the search
  * beyond its own board.
  */
-export function makeSearchJobsHandler(clientId: string): ToolHandler {
+export function makeSearchJobsHandler(
+  clientId: string,
+  config?: SearchToolConfig
+): ToolHandler {
   return async (args) => {
-    const results = await searchJobs(clientId, {
-      title: typeof args.title === "string" ? args.title : "",
-      location: typeof args.location === "string" ? args.location : "",
-      salary: typeof args.salary === "string" ? args.salary : undefined,
-      remote: typeof args.remote === "boolean" ? args.remote : undefined,
-    });
+    const results = await searchJobs(
+      clientId,
+      {
+        title: typeof args.title === "string" ? args.title : "",
+        location: typeof args.location === "string" ? args.location : "",
+        salary: typeof args.salary === "string" ? args.salary : undefined,
+        remote: typeof args.remote === "boolean" ? args.remote : undefined,
+      },
+      config
+    );
     return formatResults(results);
   };
 }

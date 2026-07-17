@@ -8,6 +8,10 @@ import { SettingsTab } from "./settings-tab";
 import { TicketsTab } from "./tickets-tab";
 import type { AdminUser, SupportTicket, UsageSummary } from "@/admin/data";
 import type { HealthReport } from "@/admin/health";
+import type {
+  SearchToolConfig,
+  SummaryToolConfig,
+} from "@/widget/data/tool-config";
 
 /** Top-level admin panel shell: the four-section tab bar. */
 export function AdminView({
@@ -15,12 +19,16 @@ export function AdminView({
   usage,
   tickets,
   systemPrompt,
+  searchConfig,
+  summaryConfig,
   health,
 }: {
   users: AdminUser[];
   usage: UsageSummary;
   tickets: SupportTicket[];
   systemPrompt: string;
+  searchConfig: SearchToolConfig;
+  summaryConfig: SummaryToolConfig;
   health: HealthReport;
 }) {
   const [tab, setTab] = useState("overview");
@@ -49,7 +57,11 @@ export function AdminView({
           <UsersTab users={users} usage={usage} />
         </TabsContent>
         <TabsContent value="settings">
-          <SettingsTab systemPrompt={systemPrompt} />
+          <SettingsTab
+            systemPrompt={systemPrompt}
+            searchConfig={searchConfig}
+            summaryConfig={summaryConfig}
+          />
         </TabsContent>
         <TabsContent value="tickets">
           <TicketsTab tickets={tickets} />
