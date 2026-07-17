@@ -20,6 +20,51 @@ interface Message {
   content: string;
 }
 
+/**
+ * Render assistant text with clickable job links. Turns markdown links
+ * [label](url) and bare http(s) URLs into anchors; everything else is left as
+ * plain text (whitespace-pre-wrap on the bubble preserves line breaks).
+ */
+function Linkified({ text }: { text: string }) {
+  // Markdown links first, then bare URLs in the remaining text.
+  const pattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s)]+)/g;
+  const nodes: React.ReactNode[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let key = 0;
+
+  const anchor = (href: string, label: string) => (
+    <a
+      key={key++}
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="font-medium underline underline-offset-2"
+      style={{ color: BRAND.color }}
+    >
+      {label}
+    </a>
+  );
+
+  while ((m = pattern.exec(text)) !== null) {
+    if (m.index > last) nodes.push(text.slice(last, m.index));
+    if (m[2]) {
+      // [label](url)
+      nodes.push(anchor(m[2], m[1]));
+    } else if (m[3]) {
+      // bare url — trim trailing sentence punctuation so it stays a valid link
+      const raw = m[3];
+      const trimmed = raw.replace(/[.,;:!?]+$/, "");
+      nodes.push(anchor(trimmed, trimmed));
+      if (trimmed.length < raw.length) nodes.push(raw.slice(trimmed.length));
+    }
+    last = pattern.lastIndex;
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+
+  return <>{nodes}</>;
+}
+
 // Placeholder brand for Slice 1 (neo-purple, matching the portal accent).
 const BRAND = {
   name: "Alex",
@@ -102,7 +147,7 @@ export default function EmbedPage() {
                   : { backgroundColor: "oklch(0.97 0.005 286)" }
               }
             >
-              {m.content}
+              {m.role === "assistant" ? <Linkified text={m.content} /> : m.content}
             </div>
           </div>
         ))}
