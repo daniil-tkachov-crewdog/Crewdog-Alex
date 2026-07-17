@@ -16,7 +16,7 @@ export function Logo({
     <Link href={href} className="inline-flex items-center">
       <span
         className={cn(
-          "font-semibold tracking-tight text-lg text-foreground",
+          "font-display font-semibold tracking-tight text-lg text-foreground",
           className
         )}
       >

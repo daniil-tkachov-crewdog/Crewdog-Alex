@@ -41,10 +41,10 @@
   --input: oklch(0.92 0.006 286);
   --ring: oklch(0.54 0.23 293);
 
-  /* status lights (green / amber / red) */
-  --status-green: oklch(0.72 0.17 150);
-  --status-amber: oklch(0.79 0.16 78);
-  --status-red: oklch(0.62 0.22 27);
+  /* status lights (green / amber / red) — tuned to the redesign */
+  --status-green: oklch(0.62 0.16 150);
+  --status-amber: oklch(0.66 0.15 78);
+  --status-red: oklch(0.58 0.22 27);
 }
 
 @theme inline {
@@ -77,8 +77,11 @@
   --color-status-amber: var(--status-amber);
   --color-status-red: var(--status-red);
 
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Redesign type system: Instrument Sans (body), Space Grotesk
+     (display/headings/wordmark), JetBrains Mono (code & IDs). */
+  --font-sans: var(--font-instrument-sans), system-ui, sans-serif;
+  --font-display: var(--font-space-grotesk), var(--font-instrument-sans), sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
 }
 
 * {
@@ -88,15 +91,26 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+}
+
+/* Headings & the wordmark render in the display face (Space Grotesk). */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
 }
 
 /* "Alex" wordmark — neo-purple metal */
 .alex-metal {
   background: linear-gradient(
-    92deg,
+    94deg,
     oklch(0.5 0.24 300) 0%,
-    oklch(0.62 0.2 288) 45%,
+    oklch(0.6 0.21 290) 48%,
     oklch(0.72 0.14 296) 100%
   );
   -webkit-background-clip: text;

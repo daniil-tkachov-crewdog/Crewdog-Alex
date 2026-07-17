@@ -69,7 +69,7 @@ export function BillingTab({
                 {isCurrent && <Badge variant="secondary">Current</Badge>}
               </div>
               <div className="mt-3 flex items-baseline gap-1">
-                <span className="text-3xl font-semibold tracking-tight">
+                <span className="font-display text-3xl font-semibold tracking-tight">
                   {plan.currency}
                   {plan.price}
                 </span>

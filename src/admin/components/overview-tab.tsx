@@ -50,7 +50,7 @@ export function OverviewTab({
               </CardDescription>
             </div>
             <div className="text-right">
-              <div className="text-3xl font-semibold tracking-tight">
+              <div className="font-display text-3xl font-semibold tracking-tight">
                 {formatUsd(usage.totalCostUsd)}
               </div>
               <div className="text-xs text-muted-foreground">Total spend</div>
@@ -189,7 +189,7 @@ export function OverviewTab({
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border bg-background p-3">
-      <div className="text-lg font-semibold tracking-tight">{value}</div>
+      <div className="font-display text-lg font-semibold tracking-tight">{value}</div>
       <div className="text-xs text-muted-foreground">{label}</div>
     </div>
   );

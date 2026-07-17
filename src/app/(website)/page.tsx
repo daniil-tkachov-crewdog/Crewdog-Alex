@@ -170,7 +170,7 @@ function Pricing() {
                 {plan.tagline}
               </p>
               <div className="mt-5 flex items-baseline gap-1">
-                <span className="text-4xl font-semibold tracking-tight">
+                <span className="font-display text-4xl font-semibold tracking-tight">
                   {plan.currency}
                   {plan.price}
                 </span>
