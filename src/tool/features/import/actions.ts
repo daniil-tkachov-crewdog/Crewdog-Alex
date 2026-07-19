@@ -3,7 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionClientId } from "@/tool/db/current-client";
-import { parseJobsCsv } from "@/tool/ingest/csv/parse-csv";
+import { parseJobsCsv, type ParsedJobRow } from "@/tool/ingest/csv/parse-csv";
+import {
+  discoverFields,
+  parseFeed,
+  type FeedMapping,
+  type FeedReadResult,
+} from "@/tool/ingest/feed/parse-feed";
 import { categorizeJobs, categorizeOne } from "@/tool/ingest/categorize";
 
 export type ActionResult =
@@ -26,24 +32,27 @@ export interface JobEdit {
 }
 
 /**
- * Import a CSV. Upserts by (client_id, source_id): the 5 CSV columns + job_link
- * overwrite existing rows with the same ID (CSV is source of truth), while the
- * `disabled` flag is left untouched because it isn't in the payload.
+ * Shared import tail for every on-ramp (CSV, feed, …). Takes already-parsed
+ * rows in the internal shape and upserts them by (client_id, source_id): the
+ * mapped fields overwrite existing rows with the same ID (the source is the
+ * source of truth), while the `disabled` flag is left untouched because it
+ * isn't in the payload. Rows missing a category get one AI-derived, best-effort.
  */
-export async function importJobsCsv(csvText: string): Promise<ActionResult> {
-  const clientId = await getSessionClientId();
-  if (!clientId) return { ok: false, error: NO_SESSION };
-
-  const parsed = parseJobsCsv(csvText);
-  if (!parsed.ok) return { ok: false, error: parsed.error };
+async function writeParsedJobs(
+  clientId: string,
+  rows: ParsedJobRow[]
+): Promise<ActionResult> {
+  if (rows.length === 0) {
+    return { ok: false, error: "There were no jobs to import." };
+  }
 
   // Dedupe within the batch (last occurrence wins) — Postgres can't upsert the
   // same conflict key twice in one statement.
-  const bySourceId = new Map<string, (typeof parsed.rows)[number]>();
-  for (const row of parsed.rows) bySourceId.set(row.id, row);
+  const bySourceId = new Map<string, ParsedJobRow>();
+  for (const row of rows) bySourceId.set(row.id, row);
 
-  // AI-derive a category only for rows that didn't ship one in the CSV. Best-
-  // effort: on any failure the field stays blank ("Uncategorized" downstream).
+  // AI-derive a category only for rows that didn't ship one. Best-effort: on
+  // any failure the field stays blank ("Uncategorized" downstream).
   const deduped = [...bySourceId.values()];
   const needIdx = deduped
     .map((r, i) => (r.category.trim() ? -1 : i))
@@ -77,6 +86,107 @@ export async function importJobsCsv(csvText: string): Promise<ActionResult> {
   revalidatePath("/dashboard");
   const n = payload.length;
   return { ok: true, message: `Imported ${n} job${n === 1 ? "" : "s"}.` };
+}
+
+/** Import a CSV. Parses, then hands off to the shared upsert tail. */
+export async function importJobsCsv(csvText: string): Promise<ActionResult> {
+  const clientId = await getSessionClientId();
+  if (!clientId) return { ok: false, error: NO_SESSION };
+
+  const parsed = parseJobsCsv(csvText);
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+
+  return writeParsedJobs(clientId, parsed.rows);
+}
+
+// ── Feed-Link on-ramp ─────────────────────────────────────────────────────
+
+export type FeedReadActionResult = FeedReadResult;
+
+const FEED_TIMEOUT_MS = 15_000;
+const FEED_MAX_BYTES = 8 * 1024 * 1024; // 8 MB guard against huge/hostile responses.
+
+/** Fetch a feed URL server-side (dodges CORS) and return its raw XML, guarded. */
+async function fetchFeed(
+  url: string
+): Promise<{ ok: true; xml: string } | { ok: false; error: string }> {
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(url.trim());
+  } catch {
+    return { ok: false, error: "That doesn't look like a valid URL." };
+  }
+  if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+    return { ok: false, error: "The feed URL must start with http:// or https://." };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FEED_TIMEOUT_MS);
+  try {
+    const res = await fetch(parsedUrl, {
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        "user-agent": "CrewdogAlex/1.0 (+job feed importer)",
+        accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
+      },
+    });
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: `The feed URL returned HTTP ${res.status}. Check the link and that it's publicly accessible.`,
+      };
+    }
+    const buf = await res.arrayBuffer();
+    if (buf.byteLength > FEED_MAX_BYTES) {
+      return { ok: false, error: "The feed is too large to import (over 8 MB)." };
+    }
+    return { ok: true, xml: new TextDecoder("utf-8").decode(buf) };
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      return { ok: false, error: "The feed took too long to respond (15s). Try again later." };
+    }
+    return {
+      ok: false,
+      error: "Couldn't reach the feed URL. Check the link and try again.",
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Step 1 of the feed on-ramp: fetch the URL and report the tags available on
+ * its items, plus a best-guess default mapping, for the column-mapping UI.
+ */
+export async function readFeed(url: string): Promise<FeedReadActionResult> {
+  const clientId = await getSessionClientId();
+  if (!clientId) return { ok: false, error: NO_SESSION };
+
+  const fetched = await fetchFeed(url);
+  if (!fetched.ok) return { ok: false, error: fetched.error };
+
+  return discoverFields(fetched.xml);
+}
+
+/**
+ * Step 2 of the feed on-ramp: re-fetch the URL, project every item through the
+ * tenant's column mapping, then hand off to the shared upsert tail.
+ */
+export async function importJobsFeed(
+  url: string,
+  mapping: FeedMapping
+): Promise<ActionResult> {
+  const clientId = await getSessionClientId();
+  if (!clientId) return { ok: false, error: NO_SESSION };
+
+  const fetched = await fetchFeed(url);
+  if (!fetched.ok) return { ok: false, error: fetched.error };
+
+  const parsed = parseFeed(fetched.xml, mapping);
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+
+  return writeParsedJobs(clientId, parsed.rows);
 }
 
 /** Save inline edits for one or more rows. */

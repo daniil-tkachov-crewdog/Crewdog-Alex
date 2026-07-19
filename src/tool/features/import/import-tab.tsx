@@ -9,11 +9,12 @@ import {
   EyeOff,
   Loader2,
   Pencil,
+  Rss,
   Trash2,
   UploadCloud,
   X,
 } from "lucide-react";
-import type { JobRow } from "@/shared/job-schema";
+import type { JobRow, JobColumnKey } from "@/shared/job-schema";
 import { JOB_COLUMNS } from "@/shared/job-schema";
 import {
   Card,
@@ -25,6 +26,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -47,12 +49,18 @@ import { cn } from "@/lib/utils";
 import {
   deleteJobs,
   importJobsCsv,
+  importJobsFeed,
+  readFeed,
   setJobsDisabled,
   updateJobs,
   type JobEdit,
 } from "./actions";
+import type { FeedField, FeedMapping } from "@/tool/ingest/feed/parse-feed";
 
 type SourceKind = "csv" | "feed" | "scraping";
+
+/** Sentinel Select value meaning "don't map this column". */
+const UNMAPPED = "__none__";
 
 /** The 5 editable text columns (ID is handled separately for its dup flag). */
 const EDIT_FIELDS: { key: keyof JobEdit; label: string }[] = [
@@ -91,6 +99,12 @@ export function ImportTab({ jobs }: { jobs: JobRow[] }) {
   const [source, setSource] = useState<SourceKind>("csv");
   const [file, setFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // ── Import (Feed Link) state ──────────────────────────────────────────
+  const [feedUrl, setFeedUrl] = useState("");
+  const [feedFields, setFeedFields] = useState<FeedField[] | null>(null);
+  const [feedItemCount, setFeedItemCount] = useState(0);
+  const [mapping, setMapping] = useState<FeedMapping>({});
 
   // ── Table / editing state ─────────────────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -224,6 +238,55 @@ export function ImportTab({ jobs }: { jobs: JobRow[] }) {
     });
   }
 
+  // ── Feed Link ─────────────────────────────────────────────────────────
+  function resetFeedMapping() {
+    setFeedFields(null);
+    setFeedItemCount(0);
+    setMapping({});
+  }
+
+  function runReadFeed() {
+    if (!feedUrl.trim()) return;
+    startTransition(async () => {
+      const res = await readFeed(feedUrl);
+      if (res.ok) {
+        setFeedFields(res.fields);
+        setFeedItemCount(res.itemCount);
+        setMapping(res.suggested);
+        setNotice(
+          `Found ${res.itemCount} job${res.itemCount === 1 ? "" : "s"} and ${res.fields.length} field${res.fields.length === 1 ? "" : "s"}. Match them to your columns below.`
+        );
+      } else {
+        resetFeedMapping();
+        setErrorMsg(res.error);
+      }
+    });
+  }
+
+  function setMappingField(col: JobColumnKey, tag: string) {
+    setMapping((prev) => {
+      const next = { ...prev };
+      if (tag === UNMAPPED) delete next[col];
+      else next[col] = tag;
+      return next;
+    });
+  }
+
+  function runImportFeed() {
+    if (!feedFields || !mapping.id) return;
+    startTransition(async () => {
+      const res = await importJobsFeed(feedUrl, mapping);
+      if (res.ok) {
+        setNotice(res.message ?? "Imported.");
+        setFeedUrl("");
+        resetFeedMapping();
+        router.refresh();
+      } else {
+        setErrorMsg(res.error);
+      }
+    });
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {/* ── Block 1: choose on-ramp + upload ──────────────────────────── */}
@@ -234,7 +297,7 @@ export function ImportTab({ jobs }: { jobs: JobRow[] }) {
             Choose how to bring your job listings into Alex.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col gap-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
             <div className="flex w-full max-w-xs flex-col gap-1.5">
               <Label>Import method</Label>
@@ -247,9 +310,7 @@ export function ImportTab({ jobs }: { jobs: JobRow[] }) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="csv">CSV file</SelectItem>
-                  <SelectItem value="feed" disabled>
-                    Feed Link (coming soon)
-                  </SelectItem>
+                  <SelectItem value="feed">Feed Link (RSS / Atom)</SelectItem>
                   <SelectItem value="scraping" disabled>
                     Scraping (coming soon)
                   </SelectItem>
@@ -292,7 +353,117 @@ export function ImportTab({ jobs }: { jobs: JobRow[] }) {
                 </span>
               </div>
             )}
+
+            {source === "feed" && (
+              <div className="flex w-full flex-wrap items-end gap-3">
+                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                  <Label htmlFor="feed-url">Feed URL</Label>
+                  <Input
+                    id="feed-url"
+                    type="url"
+                    inputMode="url"
+                    placeholder="https://boards.example.com/jobs.rss"
+                    value={feedUrl}
+                    onChange={(e) => {
+                      setFeedUrl(e.target.value);
+                      if (feedFields) resetFeedMapping();
+                    }}
+                    disabled={pending}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={runReadFeed}
+                  disabled={!feedUrl.trim() || pending}
+                >
+                  {pending && !feedFields ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Rss className="size-4" />
+                  )}
+                  Read feed
+                </Button>
+              </div>
+            )}
           </div>
+
+          {/* Feed column mapping — appears once a feed has been read. */}
+          {source === "feed" && feedFields && (
+            <div className="flex flex-col gap-4 rounded-lg border p-4">
+              <div>
+                <p className="text-sm font-medium">Match feed fields to your columns</p>
+                <p className="text-muted-foreground text-sm">
+                  {feedItemCount} job{feedItemCount === 1 ? "" : "s"} found. Pick which
+                  feed field fills each column — leave any as{" "}
+                  <span className="font-medium">Don&apos;t import</span> to skip it.
+                  ID is required (it identifies each job).
+                </p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                {JOB_COLUMNS.map((col) => {
+                  const value = mapping[col.key] ?? UNMAPPED;
+                  const isId = col.key === "id";
+                  const sample = feedFields.find((f) => f.tag === mapping[col.key])?.sample;
+                  return (
+                    <div key={col.key} className="flex flex-col gap-1.5">
+                      <Label>
+                        {col.label}
+                        {isId && <span className="text-destructive"> *</span>}
+                      </Label>
+                      <Select
+                        value={value}
+                        onValueChange={(v) => setMappingField(col.key, v)}
+                      >
+                        <SelectTrigger
+                          className={cn(
+                            isId && !mapping.id && "border-destructive"
+                          )}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {!isId && (
+                            <SelectItem value={UNMAPPED}>Don&apos;t import</SelectItem>
+                          )}
+                          {feedFields.map((f) => (
+                            <SelectItem key={f.tag} value={f.tag}>
+                              {f.tag}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {sample && (
+                        <span
+                          className="text-muted-foreground truncate text-xs"
+                          title={sample}
+                        >
+                          e.g. {sample}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center gap-3">
+                <Button
+                  type="button"
+                  onClick={runImportFeed}
+                  disabled={!mapping.id || pending}
+                >
+                  {pending ? <Loader2 className="size-4 animate-spin" /> : null}
+                  Import {feedItemCount} job{feedItemCount === 1 ? "" : "s"}
+                </Button>
+                {!mapping.id && (
+                  <span className="text-muted-foreground text-sm">
+                    Map a feed field to ID to import.
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
