@@ -1,6 +1,11 @@
 import type { ClientConfig, SubscriptionStatus } from "@/shared/client-id";
 import type { JobRow } from "@/shared/job-schema";
 import { createClient } from "@/lib/supabase/server";
+import {
+  isFeedInterval,
+  type FeedSchedule,
+} from "@/tool/ingest/feed/schedule";
+import type { FeedMapping } from "@/tool/ingest/feed/parse-feed";
 import { seedClientConfig, seedJobs, seedUsage } from "./seed";
 
 /**
@@ -122,6 +127,42 @@ export async function getCurrentClientJobs(): Promise<JobRow[]> {
     job_link: r.job_link as string,
     disabled: r.disabled as boolean,
   }));
+}
+
+/**
+ * The saved feed auto-update schedule for the logged-in tenant, or null when
+ * there's no session or no schedule. Drives the import block's locked state.
+ */
+export async function getCurrentClientFeedSchedule(): Promise<FeedSchedule | null> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("client_id")
+    .eq("id", user.id)
+    .single();
+  if (!profile) return null;
+
+  const { data, error } = await supabase
+    .from("feed_sources")
+    .select("url, mapping, interval_hours, enabled, last_run_at")
+    .eq("client_id", profile.client_id)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  const interval = Number(data.interval_hours);
+  return {
+    url: data.url as string,
+    mapping: (data.mapping ?? {}) as FeedMapping,
+    intervalHours: isFeedInterval(interval) ? interval : 24,
+    enabled: data.enabled as boolean,
+    lastRunAt: (data.last_run_at as string | null) ?? null,
+  };
 }
 
 export async function getCurrentClientUsage(): Promise<{

@@ -34,9 +34,9 @@ export function BillingTab({
     <div className="flex flex-col gap-6">
       {/* Block 1: status */}
       <Card>
-        <CardHeader>
-          <div className="flex items-start justify-between gap-4">
-            <div>
+        <CardHeader className="pb-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-col gap-1.5">
               <CardTitle>Subscription status</CardTitle>
               <CardDescription>
                 Your current billing standing. An active subscription keeps Alex
@@ -46,6 +46,7 @@ export function BillingTab({
             <StatusLight
               tone={subscriptionTone(status)}
               label={subscriptionLabel(status)}
+              className="shrink-0"
             />
           </div>
         </CardHeader>

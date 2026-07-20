@@ -3,6 +3,7 @@ import {
   getCurrentClientConfig,
   getCurrentClientJobs,
   getCurrentClientUsage,
+  getCurrentClientFeedSchedule,
 } from "@/tool/db/current-client";
 import { BrandingTab } from "@/tool/features/branding/branding-tab";
 import { ImportTab } from "@/tool/features/import/import-tab";
@@ -11,10 +12,11 @@ import { OverviewTab } from "@/tool/features/overview/overview-tab";
 export const metadata = { title: "Dashboard — Crewdog Alex" };
 
 export default async function DashboardPage() {
-  const [config, jobs, usage] = await Promise.all([
+  const [config, jobs, usage, feedSchedule] = await Promise.all([
     getCurrentClientConfig(),
     getCurrentClientJobs(),
     getCurrentClientUsage(),
+    getCurrentClientFeedSchedule(),
   ]);
 
   return (
@@ -37,7 +39,7 @@ export default async function DashboardPage() {
           <BrandingTab config={config} />
         </TabsContent>
         <TabsContent value="import">
-          <ImportTab jobs={jobs} />
+          <ImportTab jobs={jobs} feedSchedule={feedSchedule} />
         </TabsContent>
         <TabsContent value="overview">
           <OverviewTab

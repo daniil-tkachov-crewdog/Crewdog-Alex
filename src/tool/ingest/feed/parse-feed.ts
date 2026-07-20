@@ -15,6 +15,9 @@
  * and error style of ingest/csv/parse-csv.ts.
  */
 
+import { GENERATE_ID } from "@/tool/ingest/column-mapping";
+import { generateJobId } from "@/tool/ingest/generate-id";
+
 /** A row parsed out of a feed, normalized to the internal job fields. */
 export interface ParsedJobRow {
   id: string;
@@ -340,25 +343,33 @@ export function parseFeed(xml: string, mapping: FeedMapping): FeedParseResult {
     return el ? elementValue(el) : "";
   };
 
+  const generateId = mapping.id === GENERATE_ID;
+
   const rows: ParsedJobRow[] = [];
   for (let i = 0; i < items.length; i++) {
     const children = topLevelChildren(items[i]);
-    const id = valueOf(children, "id");
-    if (id === "") {
-      return {
-        ok: false,
-        error: `Entry ${i + 1}: the field mapped to ID ("${mapping.id}") is empty. Every job needs an ID — pick a field that's always present, like guid or link.`,
-      };
-    }
-    rows.push({
-      id,
+    const row: ParsedJobRow = {
+      id: "",
       title: valueOf(children, "title"),
       description: valueOf(children, "description"),
       location: valueOf(children, "location"),
       salary: valueOf(children, "salary"),
       job_link: valueOf(children, "job_link"),
       category: valueOf(children, "category"),
-    });
+    };
+
+    if (generateId) {
+      row.id = generateJobId(row);
+    } else {
+      row.id = valueOf(children, "id");
+      if (row.id === "") {
+        return {
+          ok: false,
+          error: `Entry ${i + 1}: the field mapped to ID ("${mapping.id}") is empty. Every job needs an ID — pick a field that's always present, like guid or link, or use "Generate ID".`,
+        };
+      }
+    }
+    rows.push(row);
   }
 
   return { ok: true, rows };

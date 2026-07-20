@@ -3,14 +3,20 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionClientId } from "@/tool/db/current-client";
-import { parseJobsCsv, type ParsedJobRow } from "@/tool/ingest/csv/parse-csv";
+import { discoverCsvFields, parseJobsCsvMapped } from "@/tool/ingest/csv/parse-csv";
 import {
   discoverFields,
   parseFeed,
   type FeedMapping,
   type FeedReadResult,
 } from "@/tool/ingest/feed/parse-feed";
-import { categorizeJobs, categorizeOne } from "@/tool/ingest/categorize";
+import { fetchFeed } from "@/tool/ingest/feed/fetch-feed";
+import { upsertParsedJobs } from "@/tool/ingest/upsert-jobs";
+import { categorizeOne } from "@/tool/ingest/categorize";
+import {
+  FEED_INTERVAL_HOURS,
+  type FeedIntervalHours,
+} from "@/tool/ingest/feed/schedule";
 
 export type ActionResult =
   | { ok: true; message?: string }
@@ -32,68 +38,43 @@ export interface JobEdit {
 }
 
 /**
- * Shared import tail for every on-ramp (CSV, feed, …). Takes already-parsed
- * rows in the internal shape and upserts them by (client_id, source_id): the
- * mapped fields overwrite existing rows with the same ID (the source is the
- * source of truth), while the `disabled` flag is left untouched because it
- * isn't in the payload. Rows missing a category get one AI-derived, best-effort.
+ * Shared import tail wrapper: upsert with the session (RLS) client, revalidate
+ * the dashboard, and shape the result as an ActionResult with a friendly count.
  */
 async function writeParsedJobs(
   clientId: string,
-  rows: ParsedJobRow[]
+  rows: Parameters<typeof upsertParsedJobs>[2]
 ): Promise<ActionResult> {
-  if (rows.length === 0) {
-    return { ok: false, error: "There were no jobs to import." };
-  }
-
-  // Dedupe within the batch (last occurrence wins) — Postgres can't upsert the
-  // same conflict key twice in one statement.
-  const bySourceId = new Map<string, ParsedJobRow>();
-  for (const row of rows) bySourceId.set(row.id, row);
-
-  // AI-derive a category only for rows that didn't ship one. Best-effort: on
-  // any failure the field stays blank ("Uncategorized" downstream).
-  const deduped = [...bySourceId.values()];
-  const needIdx = deduped
-    .map((r, i) => (r.category.trim() ? -1 : i))
-    .filter((i) => i >= 0);
-  const derived = await categorizeJobs(
-    needIdx.map((i) => ({ title: deduped[i].title, description: deduped[i].description }))
-  );
-  const categoryByIdx = new Map<number, string>();
-  needIdx.forEach((idx, k) => categoryByIdx.set(idx, derived[k] || ""));
-
-  const now = new Date().toISOString();
-  const payload = deduped.map((r, i) => ({
-    client_id: clientId,
-    source_id: r.id,
-    title: r.title,
-    description: r.description,
-    location: r.location,
-    salary: r.salary,
-    category: r.category.trim() || categoryByIdx.get(i) || "",
-    job_link: r.job_link,
-    updated_at: now,
-  }));
-
   const supabase = await createClient();
-  const { error } = await supabase
-    .from("jobs")
-    .upsert(payload, { onConflict: "client_id,source_id" });
-
-  if (error) return { ok: false, error: error.message };
+  const res = await upsertParsedJobs(supabase, clientId, rows);
+  if (!res.ok) return res;
 
   revalidatePath("/dashboard");
-  const n = payload.length;
+  const n = res.count;
   return { ok: true, message: `Imported ${n} job${n === 1 ? "" : "s"}.` };
 }
 
-/** Import a CSV. Parses, then hands off to the shared upsert tail. */
-export async function importJobsCsv(csvText: string): Promise<ActionResult> {
+// ── CSV on-ramp (column-mapping, mirrors the feed flow) ────────────────────
+
+export type CsvReadActionResult = FeedReadResult;
+
+/** Step 1 of the CSV on-ramp: read the file's headers for the mapping UI. */
+export async function readCsv(csvText: string): Promise<CsvReadActionResult> {
   const clientId = await getSessionClientId();
   if (!clientId) return { ok: false, error: NO_SESSION };
 
-  const parsed = parseJobsCsv(csvText);
+  return discoverCsvFields(csvText);
+}
+
+/** Step 2 of the CSV on-ramp: project rows through the mapping, then upsert. */
+export async function importJobsCsv(
+  csvText: string,
+  mapping: FeedMapping
+): Promise<ActionResult> {
+  const clientId = await getSessionClientId();
+  if (!clientId) return { ok: false, error: NO_SESSION };
+
+  const parsed = parseJobsCsvMapped(csvText, mapping);
   if (!parsed.ok) return { ok: false, error: parsed.error };
 
   return writeParsedJobs(clientId, parsed.rows);
@@ -102,58 +83,6 @@ export async function importJobsCsv(csvText: string): Promise<ActionResult> {
 // ── Feed-Link on-ramp ─────────────────────────────────────────────────────
 
 export type FeedReadActionResult = FeedReadResult;
-
-const FEED_TIMEOUT_MS = 15_000;
-const FEED_MAX_BYTES = 8 * 1024 * 1024; // 8 MB guard against huge/hostile responses.
-
-/** Fetch a feed URL server-side (dodges CORS) and return its raw XML, guarded. */
-async function fetchFeed(
-  url: string
-): Promise<{ ok: true; xml: string } | { ok: false; error: string }> {
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(url.trim());
-  } catch {
-    return { ok: false, error: "That doesn't look like a valid URL." };
-  }
-  if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-    return { ok: false, error: "The feed URL must start with http:// or https://." };
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FEED_TIMEOUT_MS);
-  try {
-    const res = await fetch(parsedUrl, {
-      redirect: "follow",
-      signal: controller.signal,
-      headers: {
-        "user-agent": "CrewdogAlex/1.0 (+job feed importer)",
-        accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
-      },
-    });
-    if (!res.ok) {
-      return {
-        ok: false,
-        error: `The feed URL returned HTTP ${res.status}. Check the link and that it's publicly accessible.`,
-      };
-    }
-    const buf = await res.arrayBuffer();
-    if (buf.byteLength > FEED_MAX_BYTES) {
-      return { ok: false, error: "The feed is too large to import (over 8 MB)." };
-    }
-    return { ok: true, xml: new TextDecoder("utf-8").decode(buf) };
-  } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") {
-      return { ok: false, error: "The feed took too long to respond (15s). Try again later." };
-    }
-    return {
-      ok: false,
-      error: "Couldn't reach the feed URL. Check the link and try again.",
-    };
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 /**
  * Step 1 of the feed on-ramp: fetch the URL and report the tags available on
@@ -172,10 +101,15 @@ export async function readFeed(url: string): Promise<FeedReadActionResult> {
 /**
  * Step 2 of the feed on-ramp: re-fetch the URL, project every item through the
  * tenant's column mapping, then hand off to the shared upsert tail.
+ *
+ * `autoUpdate` reconciles the saved schedule in the same click: pass an
+ * interval to pin this feed for scheduled re-pulls, or null to clear any
+ * existing schedule. This is what locks the import block onto a live feed.
  */
 export async function importJobsFeed(
   url: string,
-  mapping: FeedMapping
+  mapping: FeedMapping,
+  autoUpdate: { intervalHours: FeedIntervalHours } | null = null
 ): Promise<ActionResult> {
   const clientId = await getSessionClientId();
   if (!clientId) return { ok: false, error: NO_SESSION };
@@ -186,7 +120,55 @@ export async function importJobsFeed(
   const parsed = parseFeed(fetched.xml, mapping);
   if (!parsed.ok) return { ok: false, error: parsed.error };
 
-  return writeParsedJobs(clientId, parsed.rows);
+  const written = await writeParsedJobs(clientId, parsed.rows);
+  if (!written.ok) return written;
+
+  // Reconcile the auto-update schedule with the same click.
+  const supabase = await createClient();
+  if (autoUpdate) {
+    if (!FEED_INTERVAL_HOURS.includes(autoUpdate.intervalHours)) {
+      return { ok: false, error: "Invalid auto-update interval." };
+    }
+    const now = new Date().toISOString();
+    const { error } = await supabase.from("feed_sources").upsert(
+      {
+        client_id: clientId,
+        url: url.trim(),
+        mapping,
+        interval_hours: autoUpdate.intervalHours,
+        enabled: true,
+        last_run_at: now,
+        updated_at: now,
+      },
+      { onConflict: "client_id" }
+    );
+    if (error) return { ok: false, error: error.message };
+  } else {
+    // No auto-update requested → drop any prior schedule for this tenant.
+    await supabase.from("feed_sources").delete().eq("client_id", clientId);
+  }
+
+  revalidatePath("/dashboard");
+  return written;
+}
+
+/**
+ * Clear a tenant's saved feed schedule (the "Change feed" / unlock affordance).
+ * Leaves already-imported jobs in place; only stops the scheduled re-pulls.
+ */
+export async function clearFeedSchedule(): Promise<ActionResult> {
+  const clientId = await getSessionClientId();
+  if (!clientId) return { ok: false, error: NO_SESSION };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("feed_sources")
+    .delete()
+    .eq("client_id", clientId);
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath("/dashboard");
+  return { ok: true, message: "Auto-update turned off." };
 }
 
 /** Save inline edits for one or more rows. */

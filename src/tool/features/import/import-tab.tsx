@@ -45,22 +45,28 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import {
+  clearFeedSchedule,
   deleteJobs,
   importJobsCsv,
   importJobsFeed,
+  readCsv,
   readFeed,
   setJobsDisabled,
   updateJobs,
   type JobEdit,
 } from "./actions";
 import type { FeedField, FeedMapping } from "@/tool/ingest/feed/parse-feed";
+import { UNMAPPED, GENERATE_ID } from "@/tool/ingest/column-mapping";
+import {
+  FEED_INTERVAL_HOURS,
+  type FeedIntervalHours,
+  type FeedSchedule,
+} from "@/tool/ingest/feed/schedule";
 
 type SourceKind = "csv" | "feed" | "scraping";
-
-/** Sentinel Select value meaning "don't map this column". */
-const UNMAPPED = "__none__";
 
 /** The 5 editable text columns (ID is handled separately for its dup flag). */
 const EDIT_FIELDS: { key: keyof JobEdit; label: string }[] = [
@@ -91,20 +97,41 @@ function toEdit(job: JobRow): JobEdit {
  * Delete bar, edit inline, disable (grey out) or delete. All writes go through
  * server actions scoped to the logged-in client_id.
  */
-export function ImportTab({ jobs }: { jobs: JobRow[] }) {
+export function ImportTab({
+  jobs,
+  feedSchedule,
+}: {
+  jobs: JobRow[];
+  feedSchedule: FeedSchedule | null;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
-  // ── Import (CSV) state ────────────────────────────────────────────────
-  const [source, setSource] = useState<SourceKind>("csv");
+  // ── Import on-ramp state (shared column-mapping for CSV + feed) ───────
+  // If a feed schedule is saved, the block opens locked onto that feed.
+  const [source, setSource] = useState<SourceKind>(
+    feedSchedule ? "feed" : "csv"
+  );
   const [file, setFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // ── Import (Feed Link) state ──────────────────────────────────────────
-  const [feedUrl, setFeedUrl] = useState("");
+  const [feedUrl, setFeedUrl] = useState(feedSchedule?.url ?? "");
+  // Discovered source columns (feed tags or CSV headers) + their preview rows.
   const [feedFields, setFeedFields] = useState<FeedField[] | null>(null);
   const [feedItemCount, setFeedItemCount] = useState(0);
-  const [mapping, setMapping] = useState<FeedMapping>({});
+  const [mapping, setMapping] = useState<FeedMapping>(
+    feedSchedule?.mapping ?? {}
+  );
+
+  // ── Auto-update (feed only) ───────────────────────────────────────────
+  const [autoUpdate, setAutoUpdate] = useState<boolean>(
+    feedSchedule?.enabled ?? false
+  );
+  const [intervalHours, setIntervalHours] = useState<FeedIntervalHours>(
+    feedSchedule?.intervalHours ?? 24
+  );
+  // Locked = a schedule is saved; the block stays pinned to it until unlocked.
+  const [locked, setLocked] = useState<boolean>(!!feedSchedule);
 
   // ── Table / editing state ─────────────────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -222,45 +249,11 @@ export function ImportTab({ jobs }: { jobs: JobRow[] }) {
     });
   }
 
-  function runImport() {
-    if (!file) return;
-    startTransition(async () => {
-      const text = await file.text();
-      const res = await importJobsCsv(text);
-      if (res.ok) {
-        setNotice(res.message ?? "Imported.");
-        setFile(null);
-        if (fileRef.current) fileRef.current.value = "";
-        router.refresh();
-      } else {
-        setErrorMsg(res.error);
-      }
-    });
-  }
-
-  // ── Feed Link ─────────────────────────────────────────────────────────
-  function resetFeedMapping() {
+  // ── Shared column mapping (CSV headers + feed tags) ───────────────────
+  function resetMapping() {
     setFeedFields(null);
     setFeedItemCount(0);
     setMapping({});
-  }
-
-  function runReadFeed() {
-    if (!feedUrl.trim()) return;
-    startTransition(async () => {
-      const res = await readFeed(feedUrl);
-      if (res.ok) {
-        setFeedFields(res.fields);
-        setFeedItemCount(res.itemCount);
-        setMapping(res.suggested);
-        setNotice(
-          `Found ${res.itemCount} job${res.itemCount === 1 ? "" : "s"} and ${res.fields.length} field${res.fields.length === 1 ? "" : "s"}. Match them to your columns below.`
-        );
-      } else {
-        resetFeedMapping();
-        setErrorMsg(res.error);
-      }
-    });
   }
 
   function setMappingField(col: JobColumnKey, tag: string) {
@@ -272,14 +265,99 @@ export function ImportTab({ jobs }: { jobs: JobRow[] }) {
     });
   }
 
+  const foundNotice = (itemCount: number, fieldCount: number) =>
+    `Found ${itemCount} job${itemCount === 1 ? "" : "s"} and ${fieldCount} column${fieldCount === 1 ? "" : "s"}. Match them to your columns below.`;
+
+  // ── CSV on-ramp ───────────────────────────────────────────────────────
+  function runReadCsv() {
+    if (!file) return;
+    startTransition(async () => {
+      const text = await file.text();
+      const res = await readCsv(text);
+      if (res.ok) {
+        setFeedFields(res.fields);
+        setFeedItemCount(res.itemCount);
+        setMapping(res.suggested);
+        setNotice(foundNotice(res.itemCount, res.fields.length));
+      } else {
+        resetMapping();
+        setErrorMsg(res.error);
+      }
+    });
+  }
+
+  function runImportCsv() {
+    if (!file || !mapping.id) return;
+    startTransition(async () => {
+      const text = await file.text();
+      const res = await importJobsCsv(text, mapping);
+      if (res.ok) {
+        setNotice(res.message ?? "Imported.");
+        setFile(null);
+        if (fileRef.current) fileRef.current.value = "";
+        resetMapping();
+        router.refresh();
+      } else {
+        setErrorMsg(res.error);
+      }
+    });
+  }
+
+  // ── Feed Link ─────────────────────────────────────────────────────────
+  function runReadFeed() {
+    if (!feedUrl.trim()) return;
+    startTransition(async () => {
+      const res = await readFeed(feedUrl);
+      if (res.ok) {
+        setFeedFields(res.fields);
+        setFeedItemCount(res.itemCount);
+        setMapping(res.suggested);
+        setNotice(foundNotice(res.itemCount, res.fields.length));
+      } else {
+        resetMapping();
+        setErrorMsg(res.error);
+      }
+    });
+  }
+
   function runImportFeed() {
     if (!feedFields || !mapping.id) return;
     startTransition(async () => {
-      const res = await importJobsFeed(feedUrl, mapping);
+      const res = await importJobsFeed(
+        feedUrl,
+        mapping,
+        autoUpdate ? { intervalHours } : null
+      );
       if (res.ok) {
-        setNotice(res.message ?? "Imported.");
+        setNotice(
+          autoUpdate
+            ? `${res.message ?? "Imported."} Auto-update is on (every ${intervalHours}h).`
+            : (res.message ?? "Imported.")
+        );
+        if (autoUpdate) {
+          // Keep the block pinned to this live feed.
+          setLocked(true);
+        } else {
+          setFeedUrl("");
+          resetMapping();
+        }
+        router.refresh();
+      } else {
+        setErrorMsg(res.error);
+      }
+    });
+  }
+
+  // Turn auto-update off and unlock the block for editing again.
+  function unlockFeed() {
+    startTransition(async () => {
+      const res = await clearFeedSchedule();
+      if (res.ok) {
+        setLocked(false);
+        setAutoUpdate(false);
+        resetMapping();
         setFeedUrl("");
-        resetFeedMapping();
+        setNotice(res.message ?? "Auto-update turned off.");
         router.refresh();
       } else {
         setErrorMsg(res.error);
@@ -298,171 +376,281 @@ export function ImportTab({ jobs }: { jobs: JobRow[] }) {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-            <div className="flex w-full max-w-xs flex-col gap-1.5">
-              <Label>Import method</Label>
-              <Select
-                value={source}
-                onValueChange={(v) => setSource(v as SourceKind)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="csv">CSV file</SelectItem>
-                  <SelectItem value="feed">Feed Link (RSS / Atom)</SelectItem>
-                  <SelectItem value="scraping" disabled>
-                    Scraping (coming soon)
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {source === "csv" && (
-              <div className="flex flex-wrap items-center gap-3">
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept=".csv,text/csv"
-                  className="hidden"
-                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                />
+          {locked ? (
+            /* Locked: pinned to a live auto-updating feed until the user changes it. */
+            <div className="flex flex-col gap-4 rounded-lg border p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="bg-accent text-primary flex size-9 shrink-0 items-center justify-center rounded-full">
+                    <Rss className="size-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">
+                      Auto-updating from a feed
+                    </p>
+                    <p className="text-muted-foreground truncate text-sm" title={feedUrl}>
+                      {feedUrl}
+                    </p>
+                    <p className="text-muted-foreground mt-1 text-xs">
+                      Every {intervalHours} hours
+                      {feedSchedule?.lastRunAt
+                        ? ` · last updated ${new Date(feedSchedule.lastRunAt).toLocaleString()}`
+                        : ""}
+                    </p>
+                  </div>
+                </div>
+                <Badge variant="secondary" className="shrink-0">
+                  Auto Update on
+                </Badge>
+              </div>
+              <div>
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => fileRef.current?.click()}
+                  size="sm"
+                  onClick={unlockFeed}
                   disabled={pending}
                 >
-                  <UploadCloud className="size-4" />
-                  Choose CSV
-                </Button>
-                <Button
-                  type="button"
-                  onClick={runImport}
-                  disabled={!file || pending}
-                >
-                  {pending ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : null}
-                  Import
-                </Button>
-                <span className="text-muted-foreground text-sm">
-                  {file
-                    ? file.name
-                    : "Columns: ID, Job title, Job description, Location, Salary, Job link + Category (optional)"}
-                </span>
-              </div>
-            )}
-
-            {source === "feed" && (
-              <div className="flex w-full flex-wrap items-end gap-3">
-                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                  <Label htmlFor="feed-url">Feed URL</Label>
-                  <Input
-                    id="feed-url"
-                    type="url"
-                    inputMode="url"
-                    placeholder="https://boards.example.com/jobs.rss"
-                    value={feedUrl}
-                    onChange={(e) => {
-                      setFeedUrl(e.target.value);
-                      if (feedFields) resetFeedMapping();
-                    }}
-                    disabled={pending}
-                  />
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={runReadFeed}
-                  disabled={!feedUrl.trim() || pending}
-                >
-                  {pending && !feedFields ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <Rss className="size-4" />
-                  )}
-                  Read feed
-                </Button>
-              </div>
-            )}
-          </div>
-
-          {/* Feed column mapping — appears once a feed has been read. */}
-          {source === "feed" && feedFields && (
-            <div className="flex flex-col gap-4 rounded-lg border p-4">
-              <div>
-                <p className="text-sm font-medium">Match feed fields to your columns</p>
-                <p className="text-muted-foreground text-sm">
-                  {feedItemCount} job{feedItemCount === 1 ? "" : "s"} found. Pick which
-                  feed field fills each column — leave any as{" "}
-                  <span className="font-medium">Don&apos;t import</span> to skip it.
-                  ID is required (it identifies each job).
-                </p>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                {JOB_COLUMNS.map((col) => {
-                  const value = mapping[col.key] ?? UNMAPPED;
-                  const isId = col.key === "id";
-                  const sample = feedFields.find((f) => f.tag === mapping[col.key])?.sample;
-                  return (
-                    <div key={col.key} className="flex flex-col gap-1.5">
-                      <Label>
-                        {col.label}
-                        {isId && <span className="text-destructive"> *</span>}
-                      </Label>
-                      <Select
-                        value={value}
-                        onValueChange={(v) => setMappingField(col.key, v)}
-                      >
-                        <SelectTrigger
-                          className={cn(
-                            isId && !mapping.id && "border-destructive"
-                          )}
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {!isId && (
-                            <SelectItem value={UNMAPPED}>Don&apos;t import</SelectItem>
-                          )}
-                          {feedFields.map((f) => (
-                            <SelectItem key={f.tag} value={f.tag}>
-                              {f.tag}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {sample && (
-                        <span
-                          className="text-muted-foreground truncate text-xs"
-                          title={sample}
-                        >
-                          e.g. {sample}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="flex items-center gap-3">
-                <Button
-                  type="button"
-                  onClick={runImportFeed}
-                  disabled={!mapping.id || pending}
-                >
                   {pending ? <Loader2 className="size-4 animate-spin" /> : null}
-                  Import {feedItemCount} job{feedItemCount === 1 ? "" : "s"}
+                  Change feed
                 </Button>
-                {!mapping.id && (
-                  <span className="text-muted-foreground text-sm">
-                    Map a feed field to ID to import.
-                  </span>
-                )}
               </div>
             </div>
+          ) : (
+            <>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+                <div className="flex w-full max-w-xs flex-col gap-1.5">
+                  <Label>Import method</Label>
+                  <Select
+                    value={source}
+                    onValueChange={(v) => {
+                      setSource(v as SourceKind);
+                      resetMapping();
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="csv">CSV file</SelectItem>
+                      <SelectItem value="feed">Feed Link (RSS / Atom)</SelectItem>
+                      <SelectItem value="scraping" disabled>
+                        Scraping (coming soon)
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {source === "csv" && (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <input
+                      ref={fileRef}
+                      type="file"
+                      accept=".csv,text/csv"
+                      className="hidden"
+                      onChange={(e) => {
+                        setFile(e.target.files?.[0] ?? null);
+                        resetMapping();
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => fileRef.current?.click()}
+                      disabled={pending}
+                    >
+                      <UploadCloud className="size-4" />
+                      Choose CSV
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={runReadCsv}
+                      disabled={!file || pending}
+                    >
+                      {pending && !feedFields ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : null}
+                      Read columns
+                    </Button>
+                    <span className="text-muted-foreground text-sm">
+                      {file ? file.name : "Choose a CSV, then read its columns to map them."}
+                    </span>
+                  </div>
+                )}
+
+                {source === "feed" && (
+                  <div className="flex w-full flex-wrap items-end gap-3">
+                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                      <Label htmlFor="feed-url">Feed URL</Label>
+                      <Input
+                        id="feed-url"
+                        type="url"
+                        inputMode="url"
+                        placeholder="https://boards.example.com/jobs.rss"
+                        value={feedUrl}
+                        onChange={(e) => {
+                          setFeedUrl(e.target.value);
+                          if (feedFields) resetMapping();
+                        }}
+                        disabled={pending}
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={runReadFeed}
+                      disabled={!feedUrl.trim() || pending}
+                    >
+                      {pending && !feedFields ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Rss className="size-4" />
+                      )}
+                      Read feed
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {/* Column mapping — appears once columns have been read (CSV or feed). */}
+              {feedFields && (
+                <div className="flex flex-col gap-4 rounded-lg border p-4">
+                  <div>
+                    <p className="text-sm font-medium">
+                      Match {source === "feed" ? "feed fields" : "CSV columns"} to your
+                      columns
+                    </p>
+                    <p className="text-muted-foreground text-sm">
+                      {feedItemCount} job{feedItemCount === 1 ? "" : "s"} found. Pick
+                      which source column fills each field — leave any as{" "}
+                      <span className="font-medium">Don&apos;t import</span> to skip it.
+                      ID is required; choose <span className="font-medium">Generate ID</span>{" "}
+                      to create one automatically.
+                    </p>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {JOB_COLUMNS.map((col) => {
+                      const value = mapping[col.key] ?? UNMAPPED;
+                      const isId = col.key === "id";
+                      const isGenerated = isId && mapping.id === GENERATE_ID;
+                      const sample = feedFields.find(
+                        (f) => f.tag === mapping[col.key]
+                      )?.sample;
+                      return (
+                        <div key={col.key} className="flex flex-col gap-1.5">
+                          <Label>
+                            {col.label}
+                            {isId && <span className="text-destructive"> *</span>}
+                          </Label>
+                          <Select
+                            value={value}
+                            onValueChange={(v) => setMappingField(col.key, v)}
+                          >
+                            <SelectTrigger
+                              className={cn(
+                                isId && !mapping.id && "border-destructive"
+                              )}
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {/* Generate ID pinned to the top of the ID column. */}
+                              {isId && (
+                                <SelectItem value={GENERATE_ID}>
+                                  Generate ID
+                                </SelectItem>
+                              )}
+                              {!isId && (
+                                <SelectItem value={UNMAPPED}>
+                                  Don&apos;t import
+                                </SelectItem>
+                              )}
+                              {feedFields.map((f) => (
+                                <SelectItem key={f.tag} value={f.tag}>
+                                  {f.tag}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {isGenerated ? (
+                            <span className="text-muted-foreground text-xs">
+                              Auto-generated from each job&apos;s content.
+                            </span>
+                          ) : sample ? (
+                            <span
+                              className="text-muted-foreground truncate text-xs"
+                              title={sample}
+                            >
+                              e.g. {sample}
+                            </span>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Auto Update — feed only. */}
+                  {source === "feed" && (
+                    <div className="flex flex-col gap-3 rounded-md border bg-muted/40 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium">Auto Update</p>
+                          <p className="text-muted-foreground text-xs">
+                            Re-pull this feed automatically on a schedule.
+                          </p>
+                        </div>
+                        <Switch
+                          aria-label="Auto Update"
+                          checked={autoUpdate}
+                          onCheckedChange={setAutoUpdate}
+                          disabled={pending}
+                        />
+                      </div>
+                      {autoUpdate && (
+                        <div className="flex w-full max-w-xs flex-col gap-1.5">
+                          <Label>Update every</Label>
+                          <Select
+                            value={String(intervalHours)}
+                            onValueChange={(v) =>
+                              setIntervalHours(Number(v) as FeedIntervalHours)
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {FEED_INTERVAL_HOURS.map((h) => (
+                                <SelectItem key={h} value={String(h)}>
+                                  {h} hours
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-3">
+                    <Button
+                      type="button"
+                      onClick={source === "feed" ? runImportFeed : runImportCsv}
+                      disabled={!mapping.id || pending}
+                    >
+                      {pending ? <Loader2 className="size-4 animate-spin" /> : null}
+                      Import {feedItemCount} job{feedItemCount === 1 ? "" : "s"}
+                    </Button>
+                    {!mapping.id && (
+                      <span className="text-muted-foreground text-sm">
+                        Map a column to ID (or choose Generate ID) to import.
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>
@@ -594,7 +782,9 @@ export function ImportTab({ jobs }: { jobs: JobRow[] }) {
                     />
                   </TableHead>
                   {JOB_COLUMNS.map((c) => (
-                    <TableHead key={c.key}>{c.label}</TableHead>
+                    <TableHead key={c.key} className="whitespace-nowrap">
+                      {c.label}
+                    </TableHead>
                   ))}
                 </TableRow>
               </TableHeader>
@@ -681,21 +871,21 @@ export function ImportTab({ jobs }: { jobs: JobRow[] }) {
                                 )}
                               </div>
                             </TableCell>
-                            <TableCell className="align-top font-medium">
+                            <TableCell className="align-top font-medium whitespace-nowrap">
                               {job.title}
                             </TableCell>
-                            <TableCell className="text-muted-foreground max-w-xs align-top">
+                            <TableCell className="text-muted-foreground max-w-xs min-w-56 align-top">
                               <span className="line-clamp-2" title={job.description}>
                                 {job.description}
                               </span>
                             </TableCell>
-                            <TableCell className="align-top">
+                            <TableCell className="align-top whitespace-nowrap">
                               {job.location}
                             </TableCell>
-                            <TableCell className="align-top">
+                            <TableCell className="align-top whitespace-nowrap">
                               {job.salary}
                             </TableCell>
-                            <TableCell className="align-top">
+                            <TableCell className="align-top whitespace-nowrap">
                               {job.category ? (
                                 <Badge variant="secondary">{job.category}</Badge>
                               ) : (
