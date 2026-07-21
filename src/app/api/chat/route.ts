@@ -9,6 +9,7 @@ import {
   resolveSearchToolConfig,
   resolveSummaryToolConfig,
 } from "@/widget/data/tool-config";
+import { formatSearchColumnList } from "@/shared/job-schema";
 import type { ToolSpec, ToolHandler } from "@/widget/llm";
 
 /**
@@ -70,22 +71,25 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Resolve admin tool config once per request; the prompt and both tools
+  // share the read so the prompt's {{SearchColumns}} can never drift from the
+  // tool's actual required columns.
+  const [searchConfig, summaryConfig] = await Promise.all([
+    resolveSearchToolConfig(),
+    resolveSummaryToolConfig(),
+  ]);
+
   const messages: ChatMessage[] = [
     {
       role: "system",
       content: await resolveSystemPrompt({
         assistantName: client.assistantName,
         boardName: client.boardName,
+        searchColumns: formatSearchColumnList(searchConfig.searchColumns),
       }),
     },
     ...history,
   ];
-
-  // Resolve admin tool config once per request; both tools share the read.
-  const [searchConfig, summaryConfig] = await Promise.all([
-    resolveSearchToolConfig(),
-    resolveSummaryToolConfig(),
-  ]);
 
   const tools: ToolSpec[] = [buildSearchJobsTool(searchConfig)];
   const handlers: Record<string, ToolHandler> = {

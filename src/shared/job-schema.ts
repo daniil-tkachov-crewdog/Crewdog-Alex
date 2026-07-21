@@ -81,3 +81,21 @@ export const SEARCHABLE_JOB_COLUMN_KEYS: SearchableJobColumn[] =
 
 /** Columns a search runs on out of the box: the classic "what" + "where". */
 export const DEFAULT_SEARCH_COLUMNS: SearchableJobColumn[] = ["title", "location"];
+
+/**
+ * Render a set of search columns as a human-readable phrase for the system
+ * prompt's {{SearchColumns}} variable, e.g. ["title","location"] →
+ * "Job title and Location". Uses the canonical labels/order and falls back to
+ * the default columns if given nothing usable.
+ */
+export function formatSearchColumnList(cols: SearchableJobColumn[]): string {
+  const set = new Set(cols);
+  let labels = SEARCHABLE_JOB_COLUMNS.filter((c) => set.has(c.key)).map((c) => c.label);
+  if (labels.length === 0) {
+    labels = SEARCHABLE_JOB_COLUMNS.filter((c) => DEFAULT_SEARCH_COLUMNS.includes(c.key)).map(
+      (c) => c.label
+    );
+  }
+  if (labels.length === 1) return labels[0];
+  return `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+}

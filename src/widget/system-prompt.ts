@@ -12,6 +12,12 @@ export interface PromptBrand {
   assistantName: string;
   /** The job board the assistant represents. */
   boardName: string;
+  /**
+   * Human-readable list of the admin-configured essential search columns, e.g.
+   * "Job title and Location". Interpolated into the `{{SearchColumns}}`
+   * placeholder so Alex asks for exactly the details search_jobs requires.
+   */
+  searchColumns: string;
 }
 
 /**
@@ -26,6 +32,8 @@ export const DEFAULT_SYSTEM_PROMPT_TEMPLATE = [
   ``,
   `Golden rule: do what the user asked. If a single tool call can answer them, make it and answer — do not stall with clarifying questions the user didn't invite.`,
   ``,
+  `To run a job search with the search_jobs tool, you need these details from the user: {{SearchColumns}}. Ask only for whichever of them the user hasn't given yet.`,
+  ``,
   `How you work:`,
   `- If the user asks what's available, for an overview, "what have you got", "tell me what you have", or anything similar — call the summarize_jobs tool right away and give the overview (counts, main job types/categories, main locations). Do NOT ask what field or location they want first; give the overview, then invite them to narrow down. Never present the overview as a list of real jobs.`,
   `- If the user names a job/field AND a location, call search_jobs immediately and share the returned jobs as links.`,
@@ -38,11 +46,12 @@ export const DEFAULT_SYSTEM_PROMPT_TEMPLATE = [
   `Keep replies concise, warm, and conversational.`,
 ].join("\n");
 
-/** Fill a prompt template's brand placeholders for a given tenant. */
+/** Fill a prompt template's brand + search-column placeholders for a tenant. */
 export function interpolatePrompt(template: string, brand: PromptBrand): string {
   return template
     .replaceAll("{{assistantName}}", brand.assistantName)
-    .replaceAll("{{boardName}}", brand.boardName);
+    .replaceAll("{{boardName}}", brand.boardName)
+    .replaceAll("{{SearchColumns}}", brand.searchColumns);
 }
 
 export function buildSystemPrompt(brand: PromptBrand): string {
