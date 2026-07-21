@@ -1,4 +1,9 @@
 import { createServiceClient } from "@/lib/supabase/service";
+import {
+  DEFAULT_SEARCH_COLUMNS,
+  SEARCHABLE_JOB_COLUMN_KEYS,
+  type SearchableJobColumn,
+} from "@/shared/job-schema";
 
 /**
  * ── TOOL CONFIG ──────────────────────────────────────────────────────
@@ -27,6 +32,14 @@ export interface SearchToolConfig {
   minScore: number;
   /** Include disabled jobs in results. Off by default — a safety line. */
   includeDisabled: boolean;
+  /**
+   * The columns a search must match on — the "essential" fields. Each one Alex
+   * is given becomes a required tool parameter AND a required match in the RPC,
+   * so a board whose locations are all geographic can drop `location` here
+   * instead of having every remote-role search silently return nothing. Never
+   * empty; falls back to title + location.
+   */
+  searchColumns: SearchableJobColumn[];
 }
 
 export interface SummaryToolConfig {
@@ -43,6 +56,7 @@ export const DEFAULT_SEARCH_TOOL_CONFIG: SearchToolConfig = {
   resultsPerSearch: 8,
   minScore: 0,
   includeDisabled: false,
+  searchColumns: [...DEFAULT_SEARCH_COLUMNS],
 };
 
 export const DEFAULT_SUMMARY_TOOL_CONFIG: SummaryToolConfig = {
@@ -63,6 +77,18 @@ function clampFloat(value: unknown, fallback: number, min: number, max: number):
   return Math.min(Math.max(n, min), max);
 }
 
+/**
+ * Coerce an arbitrary column list to a valid, non-empty set of searchable
+ * columns: keep only whitelisted keys, drop duplicates, and preserve the
+ * canonical column order. An empty/garbage result falls back to the default,
+ * so a search always has at least one dimension to match on.
+ */
+export function normalizeSearchColumns(raw: unknown): SearchableJobColumn[] {
+  const requested = new Set(Array.isArray(raw) ? raw : []);
+  const kept = SEARCHABLE_JOB_COLUMN_KEYS.filter((key) => requested.has(key));
+  return kept.length > 0 ? kept : [...DEFAULT_SEARCH_COLUMNS];
+}
+
 /** Coerce arbitrary stored JSON into a valid SearchToolConfig. */
 export function normalizeSearchConfig(raw: unknown): SearchToolConfig {
   const o = (raw ?? {}) as Record<string, unknown>;
@@ -71,6 +97,7 @@ export function normalizeSearchConfig(raw: unknown): SearchToolConfig {
     resultsPerSearch: clampInt(o.resultsPerSearch, DEFAULT_SEARCH_TOOL_CONFIG.resultsPerSearch, 1, 25),
     minScore: clampFloat(o.minScore, DEFAULT_SEARCH_TOOL_CONFIG.minScore, 0, 5),
     includeDisabled: o.includeDisabled === true,
+    searchColumns: normalizeSearchColumns(o.searchColumns),
   };
 }
 

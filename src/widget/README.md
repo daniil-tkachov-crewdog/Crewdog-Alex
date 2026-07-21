@@ -36,11 +36,17 @@ single source of truth both tracks meet on.
 
 **Slice 1 (done):** chat only — real GPT replies.
 
-**Slice 2 (done):** `search_jobs` tool-calling (required `title`/`location` =
-hard enforcement of clarifying questions), plain tenant-scoped job search over
-the real `jobs` table (surfaces `job_link`, excludes `disabled` rows), branding
-+ subscription gating resolved from `client_id`. Read path: **server-side
-service-role** key in `/api/chat` (bypasses RLS; key stays server-only).
+**Slice 2 (done):** `search_jobs` tool-calling with the required parameters
+BUILT FROM the admin's "essential search columns" (default `title` + `location`;
+each essential column is required = hard enforcement of clarifying questions).
+Tenant-scoped ranked search over the real `jobs` table via the
+`search_jobs_flex` RPC — every essential column matched the same tolerant way
+(full-text + optional trigram), all ANDed. No column is a hardcoded gate, so a
+board whose locations are all geographic can drop `location` instead of having
+it zero out remote-role searches. Surfaces `job_link`, excludes `disabled` rows;
+branding + subscription gating resolved from `client_id`. Read path:
+**server-side service-role** key in `/api/chat` (bypasses RLS; key stays
+server-only).
 
 **Next:** per-tenant logo/colour branding (needs portal-stored branding
 columns), account-level `is_live` gating, usage/token metering.

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { Check, Loader2, Search, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { Check, ChevronDown, Loader2, Search, Sparkles } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -30,6 +30,10 @@ import type {
   SearchToolConfig,
   SummaryToolConfig,
 } from "@/widget/data/tool-config";
+import {
+  SEARCHABLE_JOB_COLUMNS,
+  type SearchableJobColumn,
+} from "@/shared/job-schema";
 
 export function SettingsTab({
   systemPrompt,
@@ -222,6 +226,16 @@ function SearchToolCard({ initial }: { initial: SearchToolConfig }) {
           </Field>
         </div>
 
+        <Field
+          label="Essential search columns"
+          hint="The columns a search must match on. Alex is asked for a value for each, and every one must match — pick fewer to widen results, more to tighten them."
+        >
+          <ColumnMultiSelect
+            selected={cfg.searchColumns}
+            onChange={(cols) => setCfg({ ...cfg, searchColumns: cols })}
+          />
+        </Field>
+
         <div className="flex items-center gap-3">
           <SaveButton
             pending={pending}
@@ -316,6 +330,95 @@ function SummaryToolCard({ initial }: { initial: SummaryToolConfig }) {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ── Column multi-select ──────────────────────────────────────────────────────
+
+/**
+ * Dropdown list of the searchable job columns; the admin ticks which ones are
+ * essential for a search. Closes on outside click. Guards against an empty
+ * selection — the last remaining column can't be unticked, since a search needs
+ * at least one column to match on.
+ */
+function ColumnMultiSelect({
+  selected,
+  onChange,
+}: {
+  selected: SearchableJobColumn[];
+  onChange: (cols: SearchableJobColumn[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  function toggle(key: SearchableJobColumn) {
+    const isOn = selected.includes(key);
+    // Never let the admin clear the last column — a search needs a dimension.
+    if (isOn && selected.length === 1) return;
+    const next = isOn
+      ? selected.filter((k) => k !== key)
+      : SEARCHABLE_JOB_COLUMNS.map((c) => c.key).filter(
+          (k) => k === key || selected.includes(k)
+        );
+    onChange(next);
+  }
+
+  const summary =
+    selected.length === 0
+      ? "Select columns…"
+      : SEARCHABLE_JOB_COLUMNS.filter((c) => selected.includes(c.key))
+          .map((c) => c.label)
+          .join(", ");
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 py-1 text-left text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+      >
+        <span className="truncate">{summary}</span>
+        <ChevronDown className="size-4 shrink-0 opacity-50" />
+      </button>
+
+      {open && (
+        <div
+          role="listbox"
+          className="absolute z-50 mt-1 w-full overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+        >
+          {SEARCHABLE_JOB_COLUMNS.map((col) => {
+            const isOn = selected.includes(col.key);
+            const isLast = isOn && selected.length === 1;
+            return (
+              <label
+                key={col.key}
+                className={`flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground ${
+                  isLast ? "cursor-not-allowed opacity-70" : ""
+                }`}
+              >
+                <Checkbox
+                  checked={isOn}
+                  disabled={isLast}
+                  onCheckedChange={() => toggle(col.key)}
+                />
+                {col.label}
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 

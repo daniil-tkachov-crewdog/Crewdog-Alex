@@ -55,3 +55,29 @@ export const JOB_COLUMNS = [
 ] as const;
 
 export type JobColumnKey = (typeof JOB_COLUMNS)[number]["key"];
+
+/**
+ * The job columns Alex's search tool is allowed to match against. The admin
+ * picks a subset of these as the "essential" columns for a search (see the
+ * Search tool card in the admin panel); the search RPC then requires a match in
+ * each chosen column. This is deliberately narrower than JOB_COLUMNS: internal
+ * keys (id) and the link column aren't meaningful search dimensions.
+ *
+ * ⚠️  Whitelist. The `key`s here are mirrored by the search_jobs_flex RPC, which
+ *     refuses any column not in its own allow-list. Keep the two in sync.
+ */
+export const SEARCHABLE_JOB_COLUMNS = [
+  { key: "title", label: "Job title" },
+  { key: "description", label: "Job description" },
+  { key: "location", label: "Location" },
+  { key: "salary", label: "Salary" },
+  { key: "category", label: "Category" },
+] as const;
+
+export type SearchableJobColumn = (typeof SEARCHABLE_JOB_COLUMNS)[number]["key"];
+
+export const SEARCHABLE_JOB_COLUMN_KEYS: SearchableJobColumn[] =
+  SEARCHABLE_JOB_COLUMNS.map((c) => c.key);
+
+/** Columns a search runs on out of the box: the classic "what" + "where". */
+export const DEFAULT_SEARCH_COLUMNS: SearchableJobColumn[] = ["title", "location"];

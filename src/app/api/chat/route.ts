@@ -3,7 +3,7 @@ import { getLLM, type ChatMessage } from "@/widget/llm";
 import { resolveSystemPrompt } from "@/widget/data/system-prompt-config";
 import { recordUsage } from "@/widget/data/usage";
 import { getClientConfigById } from "@/widget/data/client-config";
-import { SEARCH_JOBS_TOOL, makeSearchJobsHandler } from "@/widget/search-tool";
+import { buildSearchJobsTool, makeSearchJobsHandler } from "@/widget/search-tool";
 import { SUMMARIZE_JOBS_TOOL, makeSummarizeJobsHandler } from "@/widget/summary-tool";
 import {
   resolveSearchToolConfig,
@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
     resolveSummaryToolConfig(),
   ]);
 
-  const tools: ToolSpec[] = [SEARCH_JOBS_TOOL];
+  const tools: ToolSpec[] = [buildSearchJobsTool(searchConfig)];
   const handlers: Record<string, ToolHandler> = {
     search_jobs: makeSearchJobsHandler(client.clientId, searchConfig),
   };
