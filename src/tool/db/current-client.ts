@@ -1,6 +1,8 @@
 import type { ClientConfig, SubscriptionStatus } from "@/shared/client-id";
 import type { JobRow } from "@/shared/job-schema";
+import { PLANS } from "@/shared/plans";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import {
   isFeedInterval,
   type FeedSchedule,
@@ -40,7 +42,9 @@ export async function getCurrentClientConfig(): Promise<ClientConfig> {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("company_name, client_id, subscription_status")
+    .select(
+      "company_name, client_id, subscription_status, assistant_name, logo_url, instructions"
+    )
     .eq("id", user.id)
     .single();
 
@@ -51,10 +55,10 @@ export async function getCurrentClientConfig(): Promise<ClientConfig> {
   return {
     client_id: profile.client_id,
     branding: {
-      assistant_name: "Alex",
+      assistant_name: (profile.assistant_name as string | null)?.trim() || "Alex",
       board_name: profile.company_name ?? "Your board",
-      logo_url: null,
-      instructions: null,
+      logo_url: (profile.logo_url as string | null) ?? null,
+      instructions: (profile.instructions as string | null) ?? null,
     },
     subscription_status: widgetStatusFromTier(profile.subscription_status),
     data_source: null,
@@ -165,9 +169,53 @@ export async function getCurrentClientFeedSchedule(): Promise<FeedSchedule | nul
   };
 }
 
+/**
+ * Token meter for the Overview tab. The limit comes from the account's plan
+ * tier (profiles.subscription_status → PLANS[].tokenLimit); usage is the sum of
+ * this month's usage_events for the tenant. usage_events has RLS with no
+ * policies, so the month-to-date sum reads via the service-role client (scoped
+ * by client_id). No session → the local dev seed so the meter still renders.
+ */
 export async function getCurrentClientUsage(): Promise<{
   tokensUsed: number;
   tokenLimit: number;
 }> {
-  return seedUsage;
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return seedUsage;
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("client_id, subscription_status")
+    .eq("id", user.id)
+    .single();
+  if (!profile) return seedUsage;
+
+  const tier = (profile.subscription_status as string | null) ?? "free";
+  const starter = PLANS.find((p) => p.id === "starter")!;
+  const tokenLimit = (PLANS.find((p) => p.id === tier) ?? starter).tokenLimit;
+
+  // Month-to-date usage (UTC month start), best-effort.
+  let tokensUsed = 0;
+  try {
+    const admin = createServiceClient();
+    const monthStart = new Date();
+    monthStart.setUTCDate(1);
+    monthStart.setUTCHours(0, 0, 0, 0);
+    const { data } = await admin
+      .from("usage_events")
+      .select("total_tokens")
+      .eq("client_id", profile.client_id)
+      .gte("created_at", monthStart.toISOString());
+    tokensUsed = (data ?? []).reduce(
+      (sum, r) => sum + ((r.total_tokens as number) ?? 0),
+      0
+    );
+  } catch {
+    // Usage read is non-critical; fall through with tokensUsed = 0.
+  }
+
+  return { tokensUsed, tokenLimit };
 }

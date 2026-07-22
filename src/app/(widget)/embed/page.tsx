@@ -78,7 +78,27 @@ export default function EmbedPage() {
   ]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [brandName, setBrandName] = useState(BRAND.name);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Pull the tenant's branding (name + logo) for the header. Same-origin.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/widget-config?client_id=" + encodeURIComponent(readClientId()))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((cfg) => {
+        if (cancelled || !cfg) return;
+        if (typeof cfg.name === "string" && cfg.name) setBrandName(cfg.name);
+        if (typeof cfg.logoUrl === "string" && cfg.logoUrl) setLogoUrl(cfg.logoUrl);
+      })
+      .catch(() => {
+        /* keep placeholder branding */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -126,10 +146,19 @@ export default function EmbedPage() {
         className="flex items-center gap-2 px-4 py-3 text-white"
         style={{ backgroundColor: BRAND.color }}
       >
-        <span className="grid size-7 place-items-center rounded-full bg-white/20 text-sm font-semibold">
-          {BRAND.name.charAt(0)}
-        </span>
-        <span className="font-semibold">{BRAND.name}</span>
+        {logoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={logoUrl}
+            alt={brandName}
+            className="size-7 rounded-full bg-white/20 object-cover"
+          />
+        ) : (
+          <span className="grid size-7 place-items-center rounded-full bg-white/20 text-sm font-semibold">
+            {brandName.charAt(0)}
+          </span>
+        )}
+        <span className="font-semibold">{brandName}</span>
       </header>
 
       {/* Messages */}

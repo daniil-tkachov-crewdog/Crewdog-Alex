@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Logo } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import {
@@ -72,9 +73,8 @@ function AuthCard() {
             />
           </Field>
           <Field label="Password">
-            <Input
+            <PasswordInput
               name="password"
-              type="password"
               placeholder="••••••••"
               autoComplete="current-password"
               required
@@ -99,18 +99,16 @@ function AuthCard() {
             />
           </Field>
           <Field label="Password">
-            <Input
+            <PasswordInput
               name="password"
-              type="password"
               placeholder="••••••••"
               autoComplete="new-password"
               required
             />
           </Field>
           <Field label="Confirm Password">
-            <Input
+            <PasswordInput
               name="confirm"
-              type="password"
               placeholder="••••••••"
               autoComplete="new-password"
               required

@@ -86,6 +86,7 @@ export async function POST(request: NextRequest) {
         assistantName: client.assistantName,
         boardName: client.boardName,
         searchColumns: formatSearchColumnList(searchConfig.searchColumns),
+        userInstructions: client.instructions ?? undefined,
       }),
     },
     ...history,

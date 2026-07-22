@@ -64,14 +64,48 @@
     padding: "0",
   });
   button.setAttribute("aria-label", "Open Alex chat");
-  button.innerHTML = "&#128172;"; // 💬
 
+  // Folded state shows the tenant's logo when set (fetched below), else 💬.
+  // Open state always shows the ✕ on the brand color.
   var open = false;
+  var logoUrl = null;
+
+  function render() {
+    if (open) {
+      button.style.backgroundImage = "none";
+      button.style.background = BRAND_COLOR;
+      button.innerHTML = "&#10005;"; // ✕
+    } else if (logoUrl) {
+      button.innerHTML = "";
+      button.style.background = "white";
+      button.style.backgroundImage = 'url("' + logoUrl + '")';
+      button.style.backgroundSize = "cover";
+      button.style.backgroundPosition = "center";
+      button.style.backgroundRepeat = "no-repeat";
+    } else {
+      button.style.backgroundImage = "none";
+      button.style.background = BRAND_COLOR;
+      button.innerHTML = "&#128172;"; // 💬
+    }
+    button.setAttribute("aria-label", open ? "Close Alex chat" : "Open Alex chat");
+  }
+  render();
+
+  // Pull the tenant's branding (logo) for the folded button. Non-blocking.
+  fetch(origin + "/api/widget-config?client_id=" + encodeURIComponent(clientId))
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (cfg) {
+      if (cfg && cfg.logoUrl) {
+        logoUrl = cfg.logoUrl;
+        render();
+      }
+    })
+    .catch(function () { /* keep the default 💬 button */ });
+
   button.addEventListener("click", function () {
     open = !open;
     iframe.style.display = open ? "block" : "none";
-    button.innerHTML = open ? "&#10005;" : "&#128172;"; // ✕ / 💬
-    button.setAttribute("aria-label", open ? "Close Alex chat" : "Open Alex chat");
+    render();
   });
 
   function mount() {

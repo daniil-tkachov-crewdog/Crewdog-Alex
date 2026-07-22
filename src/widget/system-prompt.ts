@@ -18,6 +18,10 @@ export interface PromptBrand {
    * placeholder so Alex asks for exactly the details search_jobs requires.
    */
   searchColumns: string;
+  /** Per-client custom instructions. Injected via {{UserInstructions}} as a
+   *  SECONDARY layer — followed only where it doesn't conflict with the base
+   *  prompt. Empty/absent → no extra block is added. */
+  userInstructions?: string;
 }
 
 /**
@@ -44,14 +48,46 @@ export const DEFAULT_SYSTEM_PROMPT_TEMPLATE = [
   `- You can also answer general job-hunting questions directly.`,
   ``,
   `Keep replies concise, warm, and conversational.`,
+  ``,
+  `{{UserInstructions}}`,
 ].join("\n");
 
-/** Fill a prompt template's brand + search-column placeholders for a tenant. */
+/**
+ * Header the per-client instructions are wrapped in. The wording is what marks
+ * them as SECONDARY to the base prompt above.
+ */
+const USER_INSTRUCTIONS_HEADER =
+  "Client-specific preferences (secondary — follow these where they don't conflict with anything above):";
+
+/** Wrap raw client instructions into the framed secondary block, or "" if empty. */
+function formatUserInstructions(raw: string | undefined): string {
+  const t = (raw ?? "").trim();
+  return t ? `\n\n---\n${USER_INSTRUCTIONS_HEADER}\n${t}` : "";
+}
+
+/**
+ * Fill a prompt template's placeholders for a given tenant. Handles the brand
+ * strings and {{SearchColumns}}, plus {{UserInstructions}}: the latter is
+ * replaced with the framed secondary block (or nothing). If a template omits
+ * the {{UserInstructions}} placeholder (e.g. the stored admin template), the
+ * block is appended so instructions still land. Collapses the extra blank lines
+ * that leaves.
+ */
 export function interpolatePrompt(template: string, brand: PromptBrand): string {
-  return template
+  const block = formatUserInstructions(brand.userInstructions);
+
+  let out = template
     .replaceAll("{{assistantName}}", brand.assistantName)
     .replaceAll("{{boardName}}", brand.boardName)
     .replaceAll("{{SearchColumns}}", brand.searchColumns);
+
+  if (out.includes("{{UserInstructions}}")) {
+    out = out.replaceAll("{{UserInstructions}}", block);
+  } else if (block) {
+    out = `${out}${block}`;
+  }
+
+  return out.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 export function buildSystemPrompt(brand: PromptBrand): string {

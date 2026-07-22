@@ -119,11 +119,16 @@ function SystemPromptCard({ systemPrompt }: { systemPrompt: string }) {
           <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
             {"{{boardName}}"}
           </code>{" "}
-          to insert each tenant&apos;s branding, and{" "}
+          to insert each tenant&apos;s branding,{" "}
           <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
             {"{{SearchColumns}}"}
           </code>{" "}
-          to insert the essential search columns set below.
+          to insert the essential search columns set below, and{" "}
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
+            {"{{UserInstructions}}"}
+          </code>{" "}
+          for the tenant&apos;s own instructions (a secondary layer; appended
+          automatically if you leave the placeholder out).
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
